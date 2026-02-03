@@ -1,0 +1,7 @@
+{
+    "slackBotToken": "xoxb-your-bot-token-here",
+    "googleCredentialsFile": "/path/to/your/credentials.json",
+    "googleDriveFolderId": "1ABC123xyz_your_folder_id",
+    "localExportOutputDir": "./slack_exports",
+    "logLevel": "INFO"
+}

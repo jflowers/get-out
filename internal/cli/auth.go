@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
+	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/gdrive"
 	"github.com/spf13/cobra"
 )
@@ -39,7 +41,17 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	fmt.Println("=====================")
 	fmt.Println()
 
+	// Load settings to check for custom credentials path
+	settingsPath := filepath.Join(configDir, "settings.json")
+	settings, err := config.LoadSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
 	cfg := gdrive.DefaultConfig(configDir)
+	if settings.GoogleCredentialsFile != "" {
+		cfg.CredentialsPath = settings.GoogleCredentialsFile
+	}
 
 	// Check for credentials
 	if !gdrive.HasCredentials(cfg) {

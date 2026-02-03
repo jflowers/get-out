@@ -68,6 +68,18 @@ func runExport(cmd *cobra.Command, args []string) error {
 	fmt.Println("====================")
 	fmt.Println()
 
+	// Load settings
+	settingsPath := filepath.Join(configDir, "settings.json")
+	settings, err := config.LoadSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+
+	// Apply settings as defaults (CLI flags override)
+	if exportFolderID == "" && settings.GoogleDriveFolderID != "" {
+		exportFolderID = settings.GoogleDriveFolderID
+	}
+
 	// Load conversations config
 	configPath := filepath.Join(configDir, "conversations.json")
 	cfg, err := config.LoadConversations(configPath)
@@ -167,11 +179,13 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	// Create exporter
 	exp := exporter.NewExporter(&exporter.ExporterConfig{
-		ConfigDir:      configDir,
-		RootFolderName: exportFolder,
-		RootFolderID:   exportFolderID,
-		ChromePort:     chromePort,
-		Debug:          debugMode,
+		ConfigDir:             configDir,
+		RootFolderName:        exportFolder,
+		RootFolderID:          exportFolderID,
+		ChromePort:            chromePort,
+		Debug:                 debugMode,
+		GoogleCredentialsFile: settings.GoogleCredentialsFile,
+		SlackBotToken:         settings.SlackBotToken,
 		OnProgress: func(msg string) {
 			if verbose || debugMode {
 				fmt.Printf("  %s\n", msg)

@@ -92,7 +92,30 @@ Define which conversations to export:
 - `share`: Whether to share the exported folder (future feature)
 - `shareMembers`: Optional list of emails to share with
 
-### 4. people.json (Optional)
+### 4. settings.json (Optional)
+
+Application-wide settings:
+
+```json
+{
+    "slackBotToken": "xoxb-your-bot-token-here",
+    "googleCredentialsFile": "/path/to/your/credentials.json",
+    "googleDriveFolderId": "1ABC123xyz_your_folder_id",
+    "localExportOutputDir": "./slack_exports",
+    "logLevel": "INFO"
+}
+```
+
+**Fields:**
+- `slackBotToken`: Slack bot token for API mode (future use)
+- `googleCredentialsFile`: Custom path to Google OAuth credentials (overrides default)
+- `googleDriveFolderId`: Default Google Drive folder ID for exports (can be overridden with `--folder-id`)
+- `localExportOutputDir`: Directory for local exports (future use)
+- `logLevel`: Logging verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`)
+
+All fields are optional. CLI flags override settings values.
+
+### 5. people.json (Optional)
 
 Map Slack user IDs to display names and preferences:
 

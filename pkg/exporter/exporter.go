@@ -15,9 +15,11 @@ import (
 // Exporter orchestrates the export of Slack conversations to Google Docs.
 type Exporter struct {
 	// Configuration
-	configDir      string
-	rootFolderName string
-	rootFolderID   string
+	configDir             string
+	rootFolderName        string
+	rootFolderID          string
+	googleCredentialsFile string
+	slackBotToken         string
 
 	// Clients
 	slackClient  *slackapi.Client
@@ -45,6 +47,10 @@ type ExporterConfig struct {
 	ChromePort     int
 	Debug          bool
 	OnProgress     func(msg string)
+
+	// Optional paths from settings.json
+	GoogleCredentialsFile string // Custom path to credentials.json
+	SlackBotToken         string // Bot token for API mode
 }
 
 // Progress is a helper to report progress.
@@ -58,13 +64,15 @@ func (e *Exporter) Progress(format string, args ...interface{}) {
 // It does NOT initialize connections - call Initialize() separately.
 func NewExporter(cfg *ExporterConfig) *Exporter {
 	return &Exporter{
-		configDir:       cfg.ConfigDir,
-		rootFolderName:  cfg.RootFolderName,
-		rootFolderID:    cfg.RootFolderID,
-		debug:           cfg.Debug,
-		onProgress:      cfg.OnProgress,
-		userResolver:    parser.NewUserResolver(),
-		channelResolver: parser.NewChannelResolver(),
+		configDir:             cfg.ConfigDir,
+		rootFolderName:        cfg.RootFolderName,
+		rootFolderID:          cfg.RootFolderID,
+		googleCredentialsFile: cfg.GoogleCredentialsFile,
+		slackBotToken:         cfg.SlackBotToken,
+		debug:                 cfg.Debug,
+		onProgress:            cfg.OnProgress,
+		userResolver:          parser.NewUserResolver(),
+		channelResolver:       parser.NewChannelResolver(),
 	}
 }
 
@@ -80,6 +88,9 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 
 	e.Progress("Authenticating with Google Drive...")
 	gdriveCfg := gdrive.DefaultConfig(e.configDir)
+	if e.googleCredentialsFile != "" {
+		gdriveCfg.CredentialsPath = e.googleCredentialsFile
+	}
 	gdriveClient, err := gdrive.NewClientFromConfig(ctx, gdriveCfg)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate with Google: %w", err)
@@ -131,6 +142,9 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 
 	e.Progress("Authenticating with Google Drive...")
 	gdriveCfg := gdrive.DefaultConfig(e.configDir)
+	if e.googleCredentialsFile != "" {
+		gdriveCfg.CredentialsPath = e.googleCredentialsFile
+	}
 	gdriveClient, err := gdrive.NewClientFromConfig(ctx, gdriveCfg)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate with Google: %w", err)

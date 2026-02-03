@@ -16,6 +16,26 @@ var (
 	emailPattern          = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 )
 
+// LoadSettings loads settings.json from the config directory.
+// Returns default settings if the file doesn't exist.
+func LoadSettings(path string) (*Settings, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// settings.json is optional, return defaults
+			return DefaultSettings(), nil
+		}
+		return nil, fmt.Errorf("failed to read settings: %w", err)
+	}
+
+	settings := DefaultSettings()
+	if err := json.Unmarshal(data, settings); err != nil {
+		return nil, fmt.Errorf("failed to parse settings: %w", err)
+	}
+
+	return settings, nil
+}
+
 // LoadConversations loads and validates conversations.json.
 func LoadConversations(path string) (*ConversationsConfig, error) {
 	data, err := os.ReadFile(path)

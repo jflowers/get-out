@@ -27,6 +27,7 @@ get-out/
 │   ├── config/               # Configuration loading
 │   └── models/               # Shared data models
 ├── config/                   # Configuration files (gitignored except examples)
+│   ├── settings.json         # Application settings (credentials paths, folder ID, etc.)
 │   ├── conversations.json    # Conversations to export
 │   ├── people.json           # User ID to name mappings
 │   └── credentials.json      # Google OAuth credentials

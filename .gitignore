@@ -49,6 +49,7 @@ _old-go-code/
 # Config files with sensitive data
 config/people.json
 config/conversations.json
+config/settings.json
 
 # Export metadata
 _metadata/
