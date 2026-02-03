@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	exportFolder string
-	exportDryRun bool
-	exportResume bool
+	exportFolder   string
+	exportFolderID string
+	exportDryRun   bool
+	exportResume   bool
 )
 
 var exportCmd = &cobra.Command{
@@ -47,12 +48,16 @@ Examples:
   get-out export --dry-run
 
   # Use custom Chrome port
-  get-out export --chrome-port 9223`,
+  get-out export --chrome-port 9223
+
+  # Export to an existing Google Drive folder by ID
+  get-out export --folder-id 1ABC123xyz`,
 	RunE: runExport,
 }
 
 func init() {
-	exportCmd.Flags().StringVar(&exportFolder, "folder", "Slack Exports", "Google Drive root folder name")
+	exportCmd.Flags().StringVar(&exportFolder, "folder", "Slack Exports", "Google Drive root folder name (ignored if --folder-id is set)")
+	exportCmd.Flags().StringVar(&exportFolderID, "folder-id", "", "Google Drive folder ID to export into (uses existing folder)")
 	exportCmd.Flags().BoolVar(&exportDryRun, "dry-run", false, "Show what would be exported without actually exporting")
 	exportCmd.Flags().BoolVar(&exportResume, "resume", false, "Resume from last checkpoint")
 	rootCmd.AddCommand(exportCmd)
@@ -110,7 +115,11 @@ func runExport(cmd *cobra.Command, args []string) error {
 	if len(people.People) > 0 {
 		fmt.Printf("People mapping: %d entries\n", len(people.People))
 	}
-	fmt.Printf("Drive folder: %s\n", exportFolder)
+	if exportFolderID != "" {
+		fmt.Printf("Drive folder ID: %s\n", exportFolderID)
+	} else {
+		fmt.Printf("Drive folder: %s\n", exportFolder)
+	}
 	fmt.Printf("Chrome port: %d\n", chromePort)
 	fmt.Println()
 
@@ -160,6 +169,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	exp := exporter.NewExporter(&exporter.ExporterConfig{
 		ConfigDir:      configDir,
 		RootFolderName: exportFolder,
+		RootFolderID:   exportFolderID,
 		ChromePort:     chromePort,
 		Debug:          debugMode,
 		OnProgress: func(msg string) {

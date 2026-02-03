@@ -14,23 +14,42 @@ type FolderStructure struct {
 	client *gdrive.Client
 	index  *ExportIndex
 
-	// Root folder name in Google Drive
+	// Root folder name in Google Drive (used when creating new folder)
 	rootFolderName string
+
+	// Root folder ID in Google Drive (if specified, uses existing folder)
+	rootFolderID string
+}
+
+// FolderStructureConfig holds configuration for folder structure.
+type FolderStructureConfig struct {
+	// RootFolderName is the name for the root export folder (default: "Slack Exports")
+	RootFolderName string
+
+	// RootFolderID is an optional existing folder ID to use as the root.
+	// If provided, RootFolderName is ignored and this folder is used directly.
+	RootFolderID string
 }
 
 // NewFolderStructure creates a new folder structure manager.
-func NewFolderStructure(client *gdrive.Client, index *ExportIndex, rootFolderName string) *FolderStructure {
-	if rootFolderName == "" {
-		rootFolderName = "Slack Exports"
+func NewFolderStructure(client *gdrive.Client, index *ExportIndex, cfg *FolderStructureConfig) *FolderStructure {
+	if cfg == nil {
+		cfg = &FolderStructureConfig{}
+	}
+	if cfg.RootFolderName == "" {
+		cfg.RootFolderName = "Slack Exports"
 	}
 	return &FolderStructure{
 		client:         client,
 		index:          index,
-		rootFolderName: rootFolderName,
+		rootFolderName: cfg.RootFolderName,
+		rootFolderID:   cfg.RootFolderID,
 	}
 }
 
-// EnsureRootFolder creates or finds the root "Slack Exports" folder.
+// EnsureRootFolder creates or finds the root export folder.
+// If a root folder ID was configured, it uses that existing folder.
+// Otherwise, it finds or creates a folder by name.
 func (fs *FolderStructure) EnsureRootFolder(ctx context.Context) (*gdrive.FolderInfo, error) {
 	// Check if we already have it in the index
 	if fs.index.RootFolderID != "" {
@@ -41,7 +60,22 @@ func (fs *FolderStructure) EnsureRootFolder(ctx context.Context) (*gdrive.Folder
 		}, nil
 	}
 
-	// Find or create the root folder
+	// If a specific folder ID was configured, use it directly
+	if fs.rootFolderID != "" {
+		// Verify the folder exists and get its info
+		folder, err := fs.client.GetFolder(ctx, fs.rootFolderID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to access folder %s: %w", fs.rootFolderID, err)
+		}
+
+		// Update index with the provided folder
+		fs.index.RootFolderID = folder.ID
+		fs.index.RootFolderURL = folder.URL
+
+		return folder, nil
+	}
+
+	// Find or create the root folder by name
 	folder, err := fs.client.FindOrCreateFolder(ctx, fs.rootFolderName, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create root folder: %w", err)

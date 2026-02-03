@@ -47,6 +47,27 @@ func (c *Client) CreateFolder(ctx context.Context, name string, parentID string)
 	}, nil
 }
 
+// GetFolder retrieves a folder by its ID.
+func (c *Client) GetFolder(ctx context.Context, folderID string) (*FolderInfo, error) {
+	file, err := c.Drive.Files.Get(folderID).
+		Context(ctx).
+		Fields("id, name, webViewLink, mimeType").
+		Do()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get folder %s: %w", folderID, err)
+	}
+
+	if file.MimeType != MimeTypeFolder {
+		return nil, fmt.Errorf("ID %s is not a folder (type: %s)", folderID, file.MimeType)
+	}
+
+	return &FolderInfo{
+		ID:   file.Id,
+		Name: file.Name,
+		URL:  file.WebViewLink,
+	}, nil
+}
+
 // FindFolder finds a folder by name within a parent folder.
 // Returns nil if not found.
 func (c *Client) FindFolder(ctx context.Context, name string, parentID string) (*FolderInfo, error) {

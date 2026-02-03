@@ -17,6 +17,7 @@ type Exporter struct {
 	// Configuration
 	configDir      string
 	rootFolderName string
+	rootFolderID   string
 
 	// Clients
 	slackClient  *slackapi.Client
@@ -40,6 +41,7 @@ type Exporter struct {
 type ExporterConfig struct {
 	ConfigDir      string
 	RootFolderName string
+	RootFolderID   string // Optional: use existing folder by ID instead of creating by name
 	ChromePort     int
 	Debug          bool
 	OnProgress     func(msg string)
@@ -58,6 +60,7 @@ func NewExporter(cfg *ExporterConfig) *Exporter {
 	return &Exporter{
 		configDir:       cfg.ConfigDir,
 		rootFolderName:  cfg.RootFolderName,
+		rootFolderID:    cfg.RootFolderID,
 		debug:           cfg.Debug,
 		onProgress:      cfg.OnProgress,
 		userResolver:    parser.NewUserResolver(),
@@ -105,7 +108,10 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 	e.slackClient = slackapi.NewBrowserClient(creds.Token, creds.Cookie)
 
 	// Create folder structure manager
-	e.folderStructure = NewFolderStructure(e.gdriveClient, e.index, e.rootFolderName)
+	e.folderStructure = NewFolderStructure(e.gdriveClient, e.index, &FolderStructureConfig{
+		RootFolderName: e.rootFolderName,
+		RootFolderID:   e.rootFolderID,
+	})
 
 	// Create doc writer
 	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver)
@@ -134,7 +140,10 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 	e.slackClient = slackClient
 
 	// Create folder structure manager
-	e.folderStructure = NewFolderStructure(e.gdriveClient, e.index, e.rootFolderName)
+	e.folderStructure = NewFolderStructure(e.gdriveClient, e.index, &FolderStructureConfig{
+		RootFolderName: e.rootFolderName,
+		RootFolderID:   e.rootFolderID,
+	})
 
 	// Create doc writer
 	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver)
