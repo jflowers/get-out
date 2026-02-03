@@ -104,13 +104,13 @@ Project structure from plan.md:
 - [ ] T021 Create internal/cli/auth.go with `auth` command for Google OAuth setup
 - [ ] T022 Create cmd/get-out/main.go entry point that calls internal/cli/root.go
 - [ ] T023 Create internal/cli/discover.go with `discover` command:
-  - Fetch all conversations from Slack (channels, DMs, groups)
-  - Fetch all users from Slack workspace
-  - Generate/update conversations.json with discovered conversations
+  - Read conversations.json to get list of configured conversations
+  - For each conversation, fetch member list from Slack API
+  - Fetch user info (name, email, display name) for all members
   - Generate/update people.json with user mappings
   - Support both browser mode (xoxc token) and API mode (xoxb token)
-  - --output-dir flag to specify where to write config files
-  - --merge flag to merge with existing config (default: true)
+  - --merge flag to merge with existing people.json (default: true)
+  - Skip users already in people.json when merging
 
 **Checkpoint**: `go run ./cmd/get-out auth` completes OAuth flow; `go run ./cmd/get-out discover` generates config files
 

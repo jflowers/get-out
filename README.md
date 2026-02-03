@@ -148,9 +148,9 @@ Run this first to complete OAuth flow:
 
 This opens a browser for Google consent and saves the token.
 
-### Discover Conversations and Users (Coming Soon)
+### Discover People (Coming Soon)
 
-Generate `conversations.json` and `people.json` by fetching from Slack:
+Populate `people.json` with users from your configured conversations:
 
 ```bash
 # Requires Chrome with Slack open (browser mode)
@@ -161,12 +161,12 @@ Generate `conversations.json` and `people.json` by fetching from Slack:
 ```
 
 This will:
-- Fetch all conversations (channels, DMs, groups) you have access to
-- Fetch all users in the workspace
-- Generate/update `conversations.json` with discovered conversations
+- Read `conversations.json` to get your configured conversations
+- Fetch member lists for each conversation from Slack
+- Look up user details (name, email, display name) for all members
 - Generate/update `people.json` with user mappings
 
-**Note:** This command is not yet implemented. Currently, you must manually create these config files.
+**Note:** This command is not yet implemented. You must manually create `conversations.json` with the conversations you want to export. The `discover` command only populates `people.json` based on members of those conversations.
 
 ### List Configured Conversations
 
