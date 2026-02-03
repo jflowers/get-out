@@ -1,0 +1,37 @@
+{
+    "conversations": [
+        {
+            "id": "C04KFBJTDJR",
+            "name": "team-engineering",
+            "type": "channel",
+            "mode": "api",
+            "export": true,
+            "share": true
+        },
+        {
+            "id": "C067HL71G8N",
+            "name": "team-leadership",
+            "type": "private_channel",
+            "mode": "api",
+            "export": true,
+            "share": false
+        },
+        {
+            "id": "D06DDJ2UH2M",
+            "name": "John Smith",
+            "type": "dm",
+            "mode": "browser",
+            "export": true,
+            "share": true
+        },
+        {
+            "id": "C073BC2HHUZ",
+            "name": "Alice, Bob, Carol",
+            "type": "mpim",
+            "mode": "browser",
+            "export": true,
+            "share": true,
+            "shareMembers": ["alice@example.com", "bob@example.com"]
+        }
+    ]
+}
