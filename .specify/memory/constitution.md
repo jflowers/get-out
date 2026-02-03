@@ -93,10 +93,28 @@ All data extraction MUST leverage an active browser session (via Zen/OpenCode en
 3. **Checkpoint-First**: Implement resume capability early to handle long exports
 4. **Security Review**: All credential handling reviewed before merge
 
+## Documentation Requirements
+
+### IX. Documentation Maintenance
+
+- **README.md** MUST be kept up to date with all user-facing changes
+- Any change to CLI flags, commands, or configuration options MUST be reflected in README.md
+- New features MUST include documentation before being considered complete
+- Breaking changes MUST be clearly documented with migration instructions
+
+### Documentation Review Checklist
+
+When making changes, review and update as needed:
+1. **README.md** - Usage examples, flags, configuration options
+2. **AGENTS.md** - Build commands, project structure if changed
+3. **Constitution** - If architectural decisions or core principles change
+4. **Config examples** - If configuration schema changes
+
 ## Governance
 
 - Constitution supersedes all other implementation decisions
 - Changes to extraction strategy require documentation and testing
 - Security-related changes require explicit review
+- **All feature changes require documentation review before commit**
 
-**Version**: 1.1.0 | **Ratified**: 2026-02-03 | **Last Amended**: 2026-02-03
+**Version**: 1.2.0 | **Ratified**: 2026-02-03 | **Last Amended**: 2026-02-03

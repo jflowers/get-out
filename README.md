@@ -163,6 +163,9 @@ Start Chrome with remote debugging, then test the connection:
 
 # Custom Drive folder name
 ./get-out export --folder "My Slack Archive" --config ./config
+
+# Export to an existing Google Drive folder by ID
+./get-out export --folder-id 1ABC123xyz --config ./config
 ```
 
 ### Global Flags
@@ -173,6 +176,17 @@ Start Chrome with remote debugging, then test the connection:
 --debug              Enable debug output
 -v, --verbose        Verbose output
 ```
+
+### Export Flags
+
+```
+--folder string      Google Drive root folder name (default "Slack Exports")
+--folder-id string   Google Drive folder ID to export into (overrides --folder)
+--dry-run            Show what would be exported without actually exporting
+--resume             Resume from last checkpoint
+```
+
+**Note:** The `--folder-id` can be found in a Google Drive folder URL: `https://drive.google.com/drive/folders/{folder-id}`
 
 ## Output Structure
 
