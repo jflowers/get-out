@@ -37,10 +37,11 @@ type Exporter struct {
 	onProgress func(msg string)
 
 	// Options
-	debug    bool
-	dateFrom string // Slack timestamp: only messages after this
-	dateTo   string // Slack timestamp: only messages before this
-	syncMode bool   // Use LastMessageTS from index as oldest
+	debug      bool
+	dateFrom   string // Slack timestamp: only messages after this
+	dateTo     string // Slack timestamp: only messages before this
+	syncMode   bool   // Use LastMessageTS from index as oldest
+	resumeMode bool   // Resume incomplete exports, skip completed ones
 }
 
 // ExporterConfig holds configuration for creating an Exporter.
@@ -56,10 +57,11 @@ type ExporterConfig struct {
 	GoogleCredentialsFile string // Custom path to credentials.json
 	SlackBotToken         string // Bot token for API mode
 
-	// Date range and sync options
-	DateFrom string // Slack timestamp: only export messages after this
-	DateTo   string // Slack timestamp: only export messages before this
-	SyncMode bool   // Only export messages since last successful export
+	// Date range, sync, and resume options
+	DateFrom   string // Slack timestamp: only export messages after this
+	DateTo     string // Slack timestamp: only export messages before this
+	SyncMode   bool   // Only export messages since last successful export
+	ResumeMode bool   // Resume incomplete exports, skip completed ones
 }
 
 // Progress is a helper to report progress.
@@ -83,6 +85,7 @@ func NewExporter(cfg *ExporterConfig) *Exporter {
 		dateFrom:              cfg.DateFrom,
 		dateTo:                cfg.DateTo,
 		syncMode:              cfg.SyncMode,
+		resumeMode:            cfg.ResumeMode,
 		userResolver:          parser.NewUserResolver(),
 		channelResolver:       parser.NewChannelResolver(),
 	}
@@ -215,6 +218,9 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	}
 	result.FolderURL = convExport.FolderURL
 
+	// Set status to in_progress
+	convExport.Status = "in_progress"
+
 	// Determine oldest/latest bounds
 	oldest := ""
 	latest := ""
@@ -297,6 +303,16 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 		result.DocsCreated++
 		result.MessageCount += len(msgs)
 		e.Progress("Wrote %d messages to %s", len(msgs), date)
+
+		// Save checkpoint after each daily doc
+		if len(allMessages) > 0 {
+			convExport.LastMessageTS = allMessages[0].TS
+			convExport.MessageCount += len(msgs)
+			convExport.LastUpdated = time.Now()
+		}
+		if err := e.index.Save(); err != nil {
+			e.Progress("Warning: failed to save checkpoint: %v", err)
+		}
 	}
 
 	// Export threads if any
@@ -312,14 +328,14 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 		}
 	}
 
-	// Update conversation export state
+	// Update conversation export state — mark as complete
+	convExport.Status = "complete"
+	convExport.LastUpdated = time.Now()
 	if len(allMessages) > 0 {
 		convExport.LastMessageTS = allMessages[0].TS // Messages come in reverse order
-		convExport.MessageCount += len(allMessages)
-		convExport.LastUpdated = time.Now()
 	}
 
-	// Save index checkpoint
+	// Save final index
 	if err := e.index.Save(); err != nil {
 		e.Progress("Warning: failed to save index: %v", err)
 	}
@@ -400,6 +416,20 @@ func (e *Exporter) ExportAll(ctx context.Context, conversations []config.Convers
 
 	var results []*ExportResult
 	for i, conv := range conversations {
+		// In resume mode, skip conversations that are already complete
+		if e.resumeMode {
+			if existing := e.index.GetConversation(conv.ID); existing != nil && existing.Status == "complete" {
+				e.Progress("Skipping completed conversation %d/%d: %s", i+1, len(conversations), conv.Name)
+				results = append(results, &ExportResult{
+					ConversationID: conv.ID,
+					Name:           conv.Name,
+					FolderURL:      existing.FolderURL,
+					Skipped:        true,
+				})
+				continue
+			}
+		}
+
 		e.Progress("Exporting conversation %d/%d: %s", i+1, len(conversations), conv.Name)
 
 		result, err := e.ExportConversation(ctx, conv)
@@ -433,10 +463,14 @@ type ExportResult struct {
 	ThreadsExported int
 	Duration        time.Duration
 	Error           error
+	Skipped         bool // True if skipped during --resume (already complete)
 }
 
 // String returns a summary of the export result.
 func (r *ExportResult) String() string {
+	if r.Skipped {
+		return fmt.Sprintf("%s: skipped (already complete)", r.Name)
+	}
 	status := "OK"
 	if r.Error != nil {
 		status = fmt.Sprintf("ERROR: %v", r.Error)

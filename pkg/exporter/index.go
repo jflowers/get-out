@@ -40,6 +40,9 @@ type ConversationExport struct {
 	FolderURL       string `json:"folder_url"`
 	ThreadsFolderID string `json:"threads_folder_id,omitempty"`
 
+	// Status tracks export completion: "in_progress" or "complete"
+	Status string `json:"status"`
+
 	// DailyDocs maps date string (YYYY-MM-DD) to doc info
 	DailyDocs map[string]*DocExport `json:"daily_docs"`
 

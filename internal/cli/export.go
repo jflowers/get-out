@@ -201,6 +201,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 	if exportSync && (exportFrom != "" || exportTo != "") {
 		return fmt.Errorf("--sync cannot be combined with --from or --to")
 	}
+	if exportResume && (exportFrom != "" || exportTo != "") {
+		return fmt.Errorf("--resume cannot be combined with --from or --to")
+	}
 
 	// Parse date range flags into Slack timestamps
 	dateFrom, err := parseDateFlag(exportFrom)
@@ -229,6 +232,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 		DateFrom:              dateFrom,
 		DateTo:                dateTo,
 		SyncMode:              exportSync,
+		ResumeMode:            exportResume,
 		OnProgress: func(msg string) {
 			if verbose || debugMode {
 				fmt.Printf("  %s\n", msg)
