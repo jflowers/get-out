@@ -426,6 +426,11 @@ func (e *Exporter) exportThread(ctx context.Context, convID string, parent slack
 
 // ExportAll exports all conversations in the provided list.
 func (e *Exporter) ExportAll(ctx context.Context, conversations []config.ConversationConfig) ([]*ExportResult, error) {
+	// Pre-validate connections before starting the long export
+	if err := e.ValidateConnections(ctx); err != nil {
+		return nil, fmt.Errorf("pre-export validation failed: %w", err)
+	}
+
 	// Collect channel IDs and load only users from those conversations
 	channelIDs := make([]string, len(conversations))
 	for i, conv := range conversations {
@@ -549,6 +554,24 @@ func (e *Exporter) resolveLinksInDoc(ctx context.Context, docID string) (int, er
 	}
 
 	return e.gdriveClient.ReplaceText(ctx, docID, replacements)
+}
+
+// ValidateConnections checks that both Slack and Google connections are alive
+// before starting a potentially long export. Returns clear error messages
+// if the session has expired or the token needs refreshing.
+func (e *Exporter) ValidateConnections(ctx context.Context) error {
+	if e.slackClient == nil {
+		return fmt.Errorf("Slack client not initialized")
+	}
+
+	e.Progress("Validating Slack session...")
+	authResp, err := e.slackClient.ValidateAuth(ctx)
+	if err != nil {
+		return fmt.Errorf("Slack session expired or invalid: %w\n\nPlease refresh your Slack session in the browser and try again", err)
+	}
+	e.Progress("Slack session valid: %s @ %s", authResp.User, authResp.Team)
+
+	return nil
 }
 
 // GetRootFolderURL returns the URL of the root export folder.

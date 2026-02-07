@@ -117,6 +117,33 @@ func (c *Client) request(ctx context.Context, method, endpoint string, params ur
 	return fmt.Errorf("exhausted retries for %s", endpoint)
 }
 
+// AuthTestResponse contains the result of an auth.test API call.
+type AuthTestResponse struct {
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Team   string `json:"team,omitempty"`
+	User   string `json:"user,omitempty"`
+	TeamID string `json:"team_id,omitempty"`
+	UserID string `json:"user_id,omitempty"`
+}
+
+// ValidateAuth checks if the current token is still valid by calling auth.test.
+// Returns the auth response with team/user info, or an error if the session has expired.
+// Call this before long-running exports to fail fast.
+func (c *Client) ValidateAuth(ctx context.Context) (*AuthTestResponse, error) {
+	var resp AuthTestResponse
+	if err := c.doRequest(ctx, "POST", "auth.test", nil, &resp); err != nil {
+		return nil, fmt.Errorf("session validation failed: %w", err)
+	}
+
+	if !resp.OK {
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp, nil
+}
+
 // doRequest performs a single API request to Slack.
 func (c *Client) doRequest(ctx context.Context, method, endpoint string, params url.Values, result interface{}) error {
 	u := fmt.Sprintf("%s/%s", c.baseURL, endpoint)
