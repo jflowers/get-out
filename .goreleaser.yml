@@ -1,0 +1,45 @@
+version: 2
+
+builds:
+  - main: ./cmd/get-out
+    binary: get-out
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: "🚀 Features"
+      regexp: '^.*?feat(\(.+\))?\!?:.+$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\(.+\))?\!?:.+$'
+      order: 1
+    - title: "📝 Documentation"
+      regexp: '^.*?docs(\(.+\))?\!?:.+$'
+      order: 2
+    - title: "🔧 Other"
+      order: 999
+
+release:
+  github:
+    owner: jflowers
+    name: get-out
+  prerelease: auto
+  make_latest: true

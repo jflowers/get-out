@@ -7,7 +7,7 @@
 *.dll
 *.so
 *.dylib
-get-out
+/get-out
 
 # Test binary, built with `go test -c`
 *.test
@@ -37,3 +37,33 @@ slack-export/
 
 # Checkpoint files
 .get-out-checkpoint.json
+.checkpoint.json
+
+# Google OAuth credentials (sensitive)
+credentials.json
+token.json
+
+# Old code backup
+_old-go-code/
+
+# Config files with sensitive data
+config/people.json
+config/conversations.json
+config/settings.json
+
+# Export metadata
+_metadata/
+
+# Old project don't commit
+old-project-don't-commit/
+
+# macOS
+.DS_Store
+
+# Old config files (superseded by conversations.json)
+config/browser-export.json
+config/channels.json
+
+# Spec-kit tooling (optional - remove if you want to commit these)
+# .opencode/
+# .specify/

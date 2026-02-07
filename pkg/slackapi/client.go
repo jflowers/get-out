@@ -1,564 +1,453 @@
 package slackapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"sync"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
-// Client is a Slack API client using session-based authentication.
+const (
+	defaultBaseURL = "https://slack.com/api"
+	defaultTimeout = 30 * time.Second
+)
+
+// Client is a Slack API client supporting both browser and bot authentication.
 type Client struct {
-	token      string
-	cookie     string
-	teamID     string
 	httpClient *http.Client
 	baseURL    string
-
-	// Enterprise detection
-	isEnterprise   bool
-	restrictedAPIs map[string]bool // APIs known to be restricted
-	restrictedMu   sync.RWMutex
-
-	// User cache
-	userCache map[string]*User
-	userMu    sync.RWMutex
-
-	// Rate limiting
-	rateLimiter *time.Ticker
-	rateLimit   time.Duration
+	token      string // xoxc- or xoxb- token
+	cookie     string // xoxd- cookie (only for browser mode)
+	mode       AuthMode
 }
 
-// ClientConfig holds configuration for the API client.
-type ClientConfig struct {
-	Token        string
-	Cookie       string
-	TeamID       string
-	IsEnterprise bool
-	RateLimit    time.Duration // Minimum time between requests
-}
+// AuthMode represents the authentication mode.
+type AuthMode int
 
-// NewClient creates a new Slack API client.
-func NewClient(cfg *ClientConfig) *Client {
-	rateLimit := cfg.RateLimit
-	if rateLimit == 0 {
-		// Default: 1 request per 100ms to stay well under rate limits
-		rateLimit = 100 * time.Millisecond
-	}
+const (
+	// AuthModeBrowser uses xoxc token + xoxd cookie (for DMs, groups)
+	AuthModeBrowser AuthMode = iota
+	// AuthModeAPI uses xoxb bot token (for channels)
+	AuthModeAPI
+)
 
-	return &Client{
-		token:          cfg.Token,
-		cookie:         cfg.Cookie,
-		teamID:         cfg.TeamID,
-		isEnterprise:   cfg.IsEnterprise,
-		baseURL:        "https://slack.com/api",
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
-		restrictedAPIs: make(map[string]bool),
-		userCache:      make(map[string]*User),
-		rateLimit:      rateLimit,
+// ClientOption configures the client.
+type ClientOption func(*Client)
+
+// WithHTTPClient sets a custom HTTP client.
+func WithHTTPClient(c *http.Client) ClientOption {
+	return func(client *Client) {
+		client.httpClient = c
 	}
 }
 
-// IsEnterprise returns whether this is an enterprise workspace.
-func (c *Client) IsEnterprise() bool {
-	return c.isEnterprise
+// WithBaseURL sets a custom base URL.
+func WithBaseURL(u string) ClientOption {
+	return func(client *Client) {
+		client.baseURL = u
+	}
 }
 
-// IsAPIRestricted returns whether an API method is known to be restricted.
-func (c *Client) IsAPIRestricted(method string) bool {
-	c.restrictedMu.RLock()
-	defer c.restrictedMu.RUnlock()
-	return c.restrictedAPIs[method]
+// NewBrowserClient creates a client using browser-extracted credentials.
+// This mode can access DMs and group messages.
+func NewBrowserClient(token, cookie string, opts ...ClientOption) *Client {
+	c := &Client{
+		httpClient: &http.Client{Timeout: defaultTimeout},
+		baseURL:    defaultBaseURL,
+		token:      token,
+		cookie:     cookie,
+		mode:       AuthModeBrowser,
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-// markRestricted marks an API as restricted after receiving an error.
-func (c *Client) markRestricted(method string) {
-	c.restrictedMu.Lock()
-	defer c.restrictedMu.Unlock()
-	c.restrictedAPIs[method] = true
+// NewAPIClient creates a client using a bot token (xoxb-).
+// This mode can access channels where the bot is installed.
+func NewAPIClient(token string, opts ...ClientOption) *Client {
+	c := &Client{
+		httpClient: &http.Client{Timeout: defaultTimeout},
+		baseURL:    defaultBaseURL,
+		token:      token,
+		mode:       AuthModeAPI,
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-// doRequest performs an HTTP request to the Slack API.
-func (c *Client) doRequest(ctx context.Context, method, endpoint string, body interface{}) ([]byte, error) {
-	// Rate limiting
-	time.Sleep(c.rateLimit)
+// Mode returns the authentication mode of the client.
+func (c *Client) Mode() AuthMode {
+	return c.mode
+}
 
-	url := c.baseURL + "/" + endpoint
+// request makes an API request to Slack with automatic rate-limit retry.
+func (c *Client) request(ctx context.Context, method, endpoint string, params url.Values, result interface{}) error {
+	const maxRetries = 3
 
-	var reqBody io.Reader
-	if body != nil {
-		jsonBody, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		err := c.doRequest(ctx, method, endpoint, params, result)
+		if err == nil {
+			return nil
 		}
-		reqBody = bytes.NewReader(jsonBody)
+
+		// If rate-limited, wait and retry
+		rle, ok := err.(*RateLimitError)
+		if !ok || attempt == maxRetries {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(rle.RetryAfter):
+			fmt.Fprintf(os.Stderr, "  Rate limited on %s, waited %v (attempt %d/%d)\n", endpoint, rle.RetryAfter, attempt+1, maxRetries)
+		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+	return fmt.Errorf("exhausted retries for %s", endpoint)
+}
+
+// doRequest performs a single API request to Slack.
+func (c *Client) doRequest(ctx context.Context, method, endpoint string, params url.Values, result interface{}) error {
+	u := fmt.Sprintf("%s/%s", c.baseURL, endpoint)
+
+	var body io.Reader
+	if params != nil {
+		body = strings.NewReader(params.Encode())
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers to mimic browser
+	// Set headers
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Cookie", "d="+c.cookie)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-	req.Header.Set("Origin", "https://app.slack.com")
-	req.Header.Set("Referer", "https://app.slack.com/")
+
+	// Add cookie for browser mode
+	if c.mode == AuthModeBrowser && c.cookie != "" {
+		req.Header.Set("Cookie", "d="+c.cookie)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Check for rate limiting via headers
-	if resp.StatusCode == 429 {
-		retryAfter := resp.Header.Get("Retry-After")
-		return nil, &RateLimitError{RetryAfter: retryAfter}
-	}
-
-	return respBody, nil
-}
-
-// RateLimitError indicates the API rate limit was hit.
-type RateLimitError struct {
-	RetryAfter string
-}
-
-func (e *RateLimitError) Error() string {
-	return fmt.Sprintf("rate limited, retry after: %s", e.RetryAfter)
-}
-
-// ListConversations returns all conversations (DMs, groups, channels).
-func (c *Client) ListConversations(ctx context.Context, types string) ([]Conversation, error) {
-	if c.IsAPIRestricted("conversations.list") {
-		return nil, fmt.Errorf("conversations.list is restricted in this workspace")
-	}
-
-	if types == "" {
-		types = "im,mpim,private_channel"
-	}
-
-	var allConversations []Conversation
-	cursor := ""
-
-	for {
-		params := map[string]interface{}{
-			"types": types,
-			"limit": 200,
-		}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-
-		body, err := c.doRequest(ctx, "POST", "conversations.list", params)
-		if err != nil {
-			return nil, err
-		}
-
-		var resp ConversationListResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("failed to parse response: %w", err)
-		}
-
-		if !resp.OK {
-			apiErr := &APIError{OK: false, Error: resp.Error}
-			if apiErr.IsEnterpriseRestriction() {
-				c.markRestricted("conversations.list")
+	// Check for rate limiting
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfter := 1 * time.Second
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			if secs, err := strconv.Atoi(ra); err == nil {
+				retryAfter = time.Duration(secs) * time.Second
 			}
-			return nil, fmt.Errorf("API error: %s", resp.Error)
 		}
-
-		allConversations = append(allConversations, resp.Channels...)
-
-		if resp.ResponseMetadata.NextCursor == "" {
-			break
-		}
-		cursor = resp.ResponseMetadata.NextCursor
+		return &RateLimitError{RetryAfter: retryAfter}
 	}
 
-	return allConversations, nil
+	// Read response body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Parse response
+	if err := json.Unmarshal(data, result); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return nil
 }
 
-// GetConversationHistory fetches message history for a conversation.
-func (c *Client) GetConversationHistory(ctx context.Context, channelID string, opts *HistoryOptions) (*ConversationHistoryResponse, error) {
-	if c.IsAPIRestricted("conversations.history") {
-		return nil, fmt.Errorf("conversations.history is restricted in this workspace")
-	}
+// GetConversationHistory retrieves message history for a conversation.
+func (c *Client) GetConversationHistory(ctx context.Context, channelID string, opts *HistoryOptions) (*HistoryResponse, error) {
+	params := url.Values{}
+	params.Set("channel", channelID)
 
-	params := map[string]interface{}{
-		"channel": channelID,
-		"limit":   opts.getLimit(),
-	}
 	if opts != nil {
-		if opts.Cursor != "" {
-			params["cursor"] = opts.Cursor
+		if opts.Limit > 0 {
+			params.Set("limit", strconv.Itoa(opts.Limit))
 		}
-		if opts.Latest != "" {
-			params["latest"] = opts.Latest
+		if opts.Cursor != "" {
+			params.Set("cursor", opts.Cursor)
 		}
 		if opts.Oldest != "" {
-			params["oldest"] = opts.Oldest
+			params.Set("oldest", opts.Oldest)
+		}
+		if opts.Latest != "" {
+			params.Set("latest", opts.Latest)
 		}
 		if opts.Inclusive {
-			params["inclusive"] = true
+			params.Set("inclusive", "true")
 		}
+	} else {
+		params.Set("limit", "100")
 	}
 
-	body, err := c.doRequest(ctx, "POST", "conversations.history", params)
-	if err != nil {
+	var resp HistoryResponse
+	if err := c.request(ctx, "POST", "conversations.history", params, &resp); err != nil {
 		return nil, err
 	}
 
-	var resp ConversationHistoryResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
 	if !resp.OK {
-		apiErr := &APIError{OK: false, Error: resp.Error}
-		if apiErr.IsEnterpriseRestriction() {
-			c.markRestricted("conversations.history")
-		}
-		return nil, fmt.Errorf("API error: %s", resp.Error)
+		return nil, classifyError(resp.Error, 0)
 	}
 
 	return &resp, nil
 }
 
-// HistoryOptions configures history fetching.
+// HistoryOptions configures GetConversationHistory.
 type HistoryOptions struct {
-	Cursor    string
-	Latest    string // End of time range (ts)
-	Oldest    string // Start of time range (ts)
+	Limit     int    // Max messages to return (default 100, max 1000)
+	Cursor    string // Pagination cursor
+	Oldest    string // Only messages after this timestamp
+	Latest    string // Only messages before this timestamp
+	Inclusive bool   // Include messages with oldest/latest timestamp
+}
+
+// GetConversationReplies retrieves replies to a thread.
+func (c *Client) GetConversationReplies(ctx context.Context, channelID, threadTS string, opts *RepliesOptions) (*RepliesResponse, error) {
+	params := url.Values{}
+	params.Set("channel", channelID)
+	params.Set("ts", threadTS)
+
+	if opts != nil {
+		if opts.Limit > 0 {
+			params.Set("limit", strconv.Itoa(opts.Limit))
+		}
+		if opts.Cursor != "" {
+			params.Set("cursor", opts.Cursor)
+		}
+		if opts.Oldest != "" {
+			params.Set("oldest", opts.Oldest)
+		}
+		if opts.Latest != "" {
+			params.Set("latest", opts.Latest)
+		}
+		if opts.Inclusive {
+			params.Set("inclusive", "true")
+		}
+	} else {
+		params.Set("limit", "100")
+	}
+
+	var resp RepliesResponse
+	if err := c.request(ctx, "POST", "conversations.replies", params, &resp); err != nil {
+		return nil, err
+	}
+
+	if !resp.OK {
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp, nil
+}
+
+// RepliesOptions configures GetConversationReplies.
+type RepliesOptions struct {
 	Limit     int
+	Cursor    string
+	Oldest    string
+	Latest    string
 	Inclusive bool
 }
 
-func (o *HistoryOptions) getLimit() int {
-	if o == nil || o.Limit == 0 {
-		return 100
-	}
-	return o.Limit
-}
-
-// GetConversationReplies fetches replies to a threaded message.
-func (c *Client) GetConversationReplies(ctx context.Context, channelID, threadTS string, opts *HistoryOptions) (*ConversationRepliesResponse, error) {
-	if c.IsAPIRestricted("conversations.replies") {
-		return nil, fmt.Errorf("conversations.replies is restricted in this workspace")
-	}
-
-	params := map[string]interface{}{
-		"channel": channelID,
-		"ts":      threadTS,
-		"limit":   opts.getLimit(),
-	}
-	if opts != nil && opts.Cursor != "" {
-		params["cursor"] = opts.Cursor
-	}
-
-	body, err := c.doRequest(ctx, "POST", "conversations.replies", params)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp ConversationRepliesResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if !resp.OK {
-		apiErr := &APIError{OK: false, Error: resp.Error}
-		if apiErr.IsEnterpriseRestriction() {
-			c.markRestricted("conversations.replies")
-		}
-		return nil, fmt.Errorf("API error: %s", resp.Error)
-	}
-
-	return &resp, nil
-}
-
-// GetAllMessages fetches all messages from a conversation with pagination.
-func (c *Client) GetAllMessages(ctx context.Context, channelID string, checkpoint string) ([]Message, string, error) {
-	var allMessages []Message
-	opts := &HistoryOptions{
-		Oldest: checkpoint,
-		Limit:  200,
-	}
-
-	lastTS := ""
-	for {
-		resp, err := c.GetConversationHistory(ctx, channelID, opts)
-		if err != nil {
-			return allMessages, lastTS, err
-		}
-
-		for _, msg := range resp.Messages {
-			allMessages = append(allMessages, msg)
-			if msg.Timestamp > lastTS {
-				lastTS = msg.Timestamp
-			}
-
-			// Fetch thread replies if this is a parent message
-			if msg.ReplyCount > 0 && msg.ThreadTS == "" {
-				replies, err := c.getAllReplies(ctx, channelID, msg.Timestamp)
-				if err != nil {
-					fmt.Printf("Warning: failed to fetch replies for %s: %v\n", msg.Timestamp, err)
-				} else {
-					// Skip first message (it's the parent)
-					if len(replies) > 1 {
-						allMessages = append(allMessages, replies[1:]...)
-					}
-				}
-			}
-		}
-
-		if !resp.HasMore {
-			break
-		}
-		opts.Cursor = resp.ResponseMetadata.NextCursor
-	}
-
-	return allMessages, lastTS, nil
-}
-
-// getAllReplies fetches all replies to a thread.
-func (c *Client) getAllReplies(ctx context.Context, channelID, threadTS string) ([]Message, error) {
-	var allReplies []Message
-	opts := &HistoryOptions{Limit: 200}
-
-	for {
-		resp, err := c.GetConversationReplies(ctx, channelID, threadTS, opts)
-		if err != nil {
-			return allReplies, err
-		}
-
-		allReplies = append(allReplies, resp.Messages...)
-
-		if !resp.HasMore {
-			break
-		}
-		opts.Cursor = resp.ResponseMetadata.NextCursor
-	}
-
-	return allReplies, nil
-}
-
-// GetUser fetches user info, using cache when available.
-func (c *Client) GetUser(ctx context.Context, userID string) (*User, error) {
-	// Check cache first
-	c.userMu.RLock()
-	if user, ok := c.userCache[userID]; ok {
-		c.userMu.RUnlock()
-		return user, nil
-	}
-	c.userMu.RUnlock()
-
-	params := map[string]interface{}{
-		"user": userID,
-	}
-
-	body, err := c.doRequest(ctx, "POST", "users.info", params)
-	if err != nil {
-		return nil, err
-	}
+// GetUserInfo retrieves information about a user.
+func (c *Client) GetUserInfo(ctx context.Context, userID string) (*User, error) {
+	params := url.Values{}
+	params.Set("user", userID)
 
 	var resp UserInfoResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := c.request(ctx, "POST", "users.info", params, &resp); err != nil {
+		return nil, err
 	}
 
 	if !resp.OK {
-		return nil, fmt.Errorf("API error: %s", resp.Error)
+		return nil, classifyError(resp.Error, 0)
 	}
-
-	// Cache the user
-	c.userMu.Lock()
-	c.userCache[userID] = &resp.User
-	c.userMu.Unlock()
 
 	return &resp.User, nil
 }
 
-// GetUsers fetches all users in the workspace.
-func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
-	var allUsers []User
-	cursor := ""
-
-	for {
-		params := map[string]interface{}{
-			"limit": 200,
-		}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-
-		body, err := c.doRequest(ctx, "POST", "users.list", params)
-		if err != nil {
-			return nil, err
-		}
-
-		var resp UsersListResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("failed to parse response: %w", err)
-		}
-
-		if !resp.OK {
-			return nil, fmt.Errorf("API error: %s", resp.Error)
-		}
-
-		allUsers = append(allUsers, resp.Members...)
-
-		// Cache users
-		c.userMu.Lock()
-		for i := range resp.Members {
-			c.userCache[resp.Members[i].ID] = &resp.Members[i]
-		}
-		c.userMu.Unlock()
-
-		if resp.ResponseMetadata.NextCursor == "" {
-			break
-		}
-		cursor = resp.ResponseMetadata.NextCursor
+// GetUsers retrieves all users in the workspace.
+func (c *Client) GetUsers(ctx context.Context, cursor string) (*UsersListResponse, error) {
+	params := url.Values{}
+	params.Set("limit", "200")
+	if cursor != "" {
+		params.Set("cursor", cursor)
 	}
 
-	return allUsers, nil
-}
-
-// BuildUserMap creates a map of user IDs to display names.
-func (c *Client) BuildUserMap(ctx context.Context) (map[string]string, error) {
-	users, err := c.GetUsers(ctx)
-	if err != nil {
+	var resp UsersListResponse
+	if err := c.request(ctx, "POST", "users.list", params, &resp); err != nil {
 		return nil, err
-	}
-
-	userMap := make(map[string]string)
-	for _, user := range users {
-		name := user.Profile.DisplayName
-		if name == "" {
-			name = user.RealName
-		}
-		if name == "" {
-			name = user.Name
-		}
-		userMap[user.ID] = name
-	}
-
-	return userMap, nil
-}
-
-// TestAccess tests API access and returns which APIs are available.
-func (c *Client) TestAccess(ctx context.Context) (*AccessReport, error) {
-	report := &AccessReport{
-		APIs: make(map[string]APIAccessStatus),
-	}
-
-	// Test auth.test first
-	body, err := c.doRequest(ctx, "POST", "auth.test", nil)
-	if err != nil {
-		return nil, fmt.Errorf("auth.test failed: %w", err)
-	}
-
-	var authResp struct {
-		OK           bool   `json:"ok"`
-		Error        string `json:"error,omitempty"`
-		URL          string `json:"url"`
-		Team         string `json:"team"`
-		User         string `json:"user"`
-		TeamID       string `json:"team_id"`
-		UserID       string `json:"user_id"`
-		IsEnterprise bool   `json:"is_enterprise_install"`
-	}
-	if err := json.Unmarshal(body, &authResp); err != nil {
-		return nil, err
-	}
-
-	if !authResp.OK {
-		return nil, fmt.Errorf("auth.test failed: %s", authResp.Error)
-	}
-
-	report.Team = authResp.Team
-	report.User = authResp.User
-	report.TeamID = authResp.TeamID
-	report.UserID = authResp.UserID
-	report.IsEnterprise = authResp.IsEnterprise || c.isEnterprise
-	report.APIs["auth.test"] = APIAccessStatus{Available: true}
-
-	// Test conversations.list
-	report.APIs["conversations.list"] = c.testAPI(ctx, "conversations.list", map[string]interface{}{
-		"types": "im",
-		"limit": 1,
-	})
-
-	// Test users.list
-	report.APIs["users.list"] = c.testAPI(ctx, "users.list", map[string]interface{}{
-		"limit": 1,
-	})
-
-	return report, nil
-}
-
-func (c *Client) testAPI(ctx context.Context, endpoint string, params map[string]interface{}) APIAccessStatus {
-	body, err := c.doRequest(ctx, "POST", endpoint, params)
-	if err != nil {
-		return APIAccessStatus{Available: false, Error: err.Error()}
-	}
-
-	var resp struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error,omitempty"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return APIAccessStatus{Available: false, Error: "parse error"}
 	}
 
 	if !resp.OK {
-		apiErr := &APIError{OK: false, Error: resp.Error}
-		if apiErr.IsEnterpriseRestriction() {
-			c.markRestricted(endpoint)
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp, nil
+}
+
+// GetConversationMembers retrieves the member IDs of a conversation.
+func (c *Client) GetConversationMembers(ctx context.Context, channelID, cursor string) (*MembersResponse, error) {
+	params := url.Values{}
+	params.Set("channel", channelID)
+	params.Set("limit", "200")
+	if cursor != "" {
+		params.Set("cursor", cursor)
+	}
+
+	var resp MembersResponse
+	if err := c.request(ctx, "POST", "conversations.members", params, &resp); err != nil {
+		return nil, err
+	}
+
+	if !resp.OK {
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp, nil
+}
+
+// GetConversationInfo retrieves information about a conversation.
+func (c *Client) GetConversationInfo(ctx context.Context, channelID string) (*Conversation, error) {
+	params := url.Values{}
+	params.Set("channel", channelID)
+
+	var resp ConversationInfoResponse
+	if err := c.request(ctx, "POST", "conversations.info", params, &resp); err != nil {
+		return nil, err
+	}
+
+	if !resp.OK {
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp.Channel, nil
+}
+
+// ListConversations retrieves a list of conversations.
+func (c *Client) ListConversations(ctx context.Context, opts *ListConversationsOptions) (*ConversationsListResponse, error) {
+	params := url.Values{}
+	params.Set("limit", "200")
+
+	if opts != nil {
+		if opts.Cursor != "" {
+			params.Set("cursor", opts.Cursor)
 		}
-		return APIAccessStatus{Available: false, Error: resp.Error, Restricted: apiErr.IsEnterpriseRestriction()}
+		if len(opts.Types) > 0 {
+			params.Set("types", strings.Join(opts.Types, ","))
+		}
+		if opts.ExcludeArchived {
+			params.Set("exclude_archived", "true")
+		}
 	}
 
-	return APIAccessStatus{Available: true}
-}
-
-// AccessReport summarizes API access capabilities.
-type AccessReport struct {
-	Team         string
-	User         string
-	TeamID       string
-	UserID       string
-	IsEnterprise bool
-	APIs         map[string]APIAccessStatus
-}
-
-// APIAccessStatus indicates whether an API is accessible.
-type APIAccessStatus struct {
-	Available  bool
-	Error      string
-	Restricted bool // True if blocked due to enterprise restrictions
-}
-
-// FormattedURL encodes parameters as form data for certain endpoints.
-func FormattedURL(base string, params map[string]string) string {
-	u, _ := url.Parse(base)
-	q := u.Query()
-	for k, v := range params {
-		q.Set(k, v)
+	var resp ConversationsListResponse
+	if err := c.request(ctx, "POST", "conversations.list", params, &resp); err != nil {
+		return nil, err
 	}
-	u.RawQuery = q.Encode()
-	return u.String()
+
+	if !resp.OK {
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp, nil
+}
+
+// ListConversationsOptions configures ListConversations.
+type ListConversationsOptions struct {
+	Cursor          string
+	Types           []string // "public_channel", "private_channel", "mpim", "im"
+	ExcludeArchived bool
+}
+
+// GetAllMessages retrieves all messages from a conversation, handling pagination.
+// It calls the callback for each batch of messages.
+// oldest and latest are Slack timestamps that bound the query window.
+func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, latest string, callback func([]Message) error) error {
+	opts := &HistoryOptions{
+		Limit:  200,
+		Oldest: oldest,
+		Latest: latest,
+	}
+
+	for {
+		resp, err := c.GetConversationHistory(ctx, channelID, opts)
+		if err != nil {
+			// Handle rate limiting
+			if rle, ok := err.(*RateLimitError); ok {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(rle.RetryAfter):
+					continue
+				}
+			}
+			return err
+		}
+
+		if len(resp.Messages) > 0 {
+			if err := callback(resp.Messages); err != nil {
+				return err
+			}
+		}
+
+		if !resp.HasMore || resp.ResponseMetadata.NextCursor == "" {
+			break
+		}
+
+		opts.Cursor = resp.ResponseMetadata.NextCursor
+	}
+
+	return nil
+}
+
+// GetAllReplies retrieves all replies in a thread, handling pagination.
+func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, callback func([]Message) error) error {
+	opts := &RepliesOptions{
+		Limit: 200,
+	}
+
+	for {
+		resp, err := c.GetConversationReplies(ctx, channelID, threadTS, opts)
+		if err != nil {
+			if rle, ok := err.(*RateLimitError); ok {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(rle.RetryAfter):
+					continue
+				}
+			}
+			return err
+		}
+
+		if len(resp.Messages) > 0 {
+			if err := callback(resp.Messages); err != nil {
+				return err
+			}
+		}
+
+		if !resp.HasMore || resp.ResponseMetadata.NextCursor == "" {
+			break
+		}
+
+		opts.Cursor = resp.ResponseMetadata.NextCursor
+	}
+
+	return nil
 }
