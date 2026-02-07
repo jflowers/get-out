@@ -10,13 +10,18 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 - **Thread support**: Exports threads to separate subfolders with linked references
 - **@Mention linking**: Converts `@mentions` to clickable Google email links in exported docs
 - **Slack link replacement**: Replaces Slack message URLs with links to the corresponding Google Docs
+- **Cross-conversation link resolution**: Second-pass scan resolves forward references across conversations
+- **Batch export**: `--all-dms` and `--all-groups` flags for bulk export by conversation type
+- **Parallel export**: `--parallel N` exports up to 5 conversations concurrently
 - **Checkpoint/Resume**: Granular checkpointing after each doc — resume crashed exports with `--resume`
 - **Incremental sync**: `--sync` mode exports only new messages since last run
+- **Pre-export validation**: Verifies Slack session and Google token before starting long exports
 - **Name resolution**: Converts Slack user IDs to real names in exported documents
+- **People discovery**: Auto-populate user mappings from configured conversations
 
 ## Prerequisites
 
-1. **Go 1.21+** - For building the binary
+1. **Go 1.24+** - For building the binary
 2. **Google Cloud Project** with:
    - Drive API enabled
    - Docs API enabled
@@ -25,6 +30,17 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 4. **Slack workspace access** - Active session in browser or bot token
 
 ## Installation
+
+### Pre-built Binaries
+
+Download the latest release from [GitHub Releases](https://github.com/jflowers/get-out/releases):
+
+- macOS (Apple Silicon): `get-out_darwin_arm64.tar.gz`
+- macOS (Intel): `get-out_darwin_amd64.tar.gz`
+- Linux (x86_64): `get-out_linux_amd64.tar.gz`
+- Linux (ARM64): `get-out_linux_arm64.tar.gz`
+
+### Build from Source
 
 ```bash
 # Clone the repository
@@ -151,7 +167,7 @@ Run this first to complete OAuth flow:
 
 This opens a browser for Google consent and saves the token.
 
-### Discover People (Coming Soon)
+### Discover People
 
 Populate `people.json` with users from your configured conversations:
 
@@ -159,8 +175,8 @@ Populate `people.json` with users from your configured conversations:
 # Requires Chrome with Slack open (browser mode)
 ./get-out discover --config ./config
 
-# Or with bot token (API mode) - coming soon
-./get-out discover --config ./config --token xoxb-...
+# Overwrite existing people.json instead of merging
+./get-out discover --no-merge --config ./config
 ```
 
 This will:
@@ -168,8 +184,9 @@ This will:
 - Fetch member lists for each conversation from Slack
 - Look up user details (name, email, display name) for all members
 - Generate/update `people.json` with user mappings
+- Skip bots, app users, and deleted users
 
-**Note:** This command is not yet implemented. You must manually create `conversations.json` with the conversations you want to export. The `discover` command only populates `people.json` based on members of those conversations.
+By default, new users are merged with existing `people.json` entries. Use `--no-merge` to overwrite.
 
 ### List Configured Conversations
 
@@ -201,6 +218,13 @@ Start Chrome with remote debugging, then test the connection:
 # Export specific conversations
 ./get-out export D06DDJ2UH2M C04KFBJTDJR --config ./config
 
+# Export all DMs or all group conversations
+./get-out export --all-dms --config ./config
+./get-out export --all-groups --config ./config
+
+# Export in parallel (up to 3 conversations at once)
+./get-out export --parallel 3 --config ./config
+
 # Sync mode - export only new messages since last run
 ./get-out export --sync --config ./config
 
@@ -209,6 +233,9 @@ Start Chrome with remote debugging, then test the connection:
 
 # Export messages from a specific date range
 ./get-out export --from 2024-01-01 --to 2024-06-30 --config ./config
+
+# Use a custom people.json for @mention linking
+./get-out export --user-mapping /path/to/people.json --config ./config
 
 # With verbose output
 ./get-out export --config ./config -v
@@ -243,10 +270,17 @@ Shows conversation export progress: status (complete/in-progress), message count
 ### Export Flags
 
 ```
---folder string      Google Drive root folder name (default "Slack Exports")
---folder-id string   Google Drive folder ID to export into (overrides --folder)
---dry-run            Show what would be exported without actually exporting
---resume             Resume from last checkpoint
+--folder string        Google Drive root folder name (default "Slack Exports")
+--folder-id string     Google Drive folder ID to export into (overrides --folder)
+--dry-run              Show what would be exported without actually exporting
+--resume               Resume from last checkpoint
+--sync                 Only export messages since last successful export
+--from string          Export messages from this date (YYYY-MM-DD)
+--to string            Export messages up to this date (YYYY-MM-DD)
+--all-dms              Export all DM conversations
+--all-groups           Export all group (MPIM) conversations
+--parallel int         Number of conversations to export concurrently, max 5 (default 1)
+--user-mapping string  Path to people.json for @mention linking
 ```
 
 **Note:** The `--folder-id` can be found in a Google Drive folder URL: `https://drive.google.com/drive/folders/{folder-id}`
@@ -312,12 +346,14 @@ get-out/
 
 ### Export Process
 
-1. Authenticates with Google Drive
-2. Creates folder structure (root -> conversation -> threads)
-3. Fetches messages with pagination
-4. Groups messages by date
-5. Writes to Google Docs with formatting
-6. Saves checkpoint for resume capability
+1. Validates Slack session and Google token (fail-fast)
+2. Authenticates with Google Drive
+3. Creates folder structure (root → conversation → threads)
+4. Fetches messages with pagination and rate limit handling
+5. Groups messages by date
+6. Writes to Google Docs with formatting, @mention links, and Slack URL replacement
+7. Saves checkpoint after each doc for resume capability
+8. Resolves cross-conversation links in a second pass
 
 ## Security Notes
 
