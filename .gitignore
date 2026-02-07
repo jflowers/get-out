@@ -67,3 +67,4 @@ config/channels.json
 # Spec-kit tooling (optional - remove if you want to commit these)
 # .opencode/
 # .specify/
+session-*.md
