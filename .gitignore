@@ -7,7 +7,7 @@
 *.dll
 *.so
 *.dylib
-get-out
+/get-out
 
 # Test binary, built with `go test -c`
 *.test

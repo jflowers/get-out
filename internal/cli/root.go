@@ -14,7 +14,20 @@ var (
 	chromePort int
 	configDir  string
 	verbose    bool
+
+	// Build info (set via SetVersion)
+	buildVersion = "dev"
+	buildCommit  = "none"
+	buildDate    = "unknown"
 )
+
+// SetVersion sets the build version info from main.go ldflags.
+func SetVersion(version, commit, date string) {
+	buildVersion = version
+	buildCommit = commit
+	buildDate = date
+	rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date)
+}
 
 // rootCmd is the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
