@@ -372,6 +372,45 @@ type MessageBlock struct {
 	Links      []LinkAnnotation // Optional hyperlinks within Content
 }
 
+// ReplaceText performs a batch find-and-replace in a Google Doc.
+// Each key in replacements is the text to find, and the value is the replacement.
+// Returns the total number of replacements made.
+func (c *Client) ReplaceText(ctx context.Context, docID string, replacements map[string]string) (int, error) {
+	if len(replacements) == 0 {
+		return 0, nil
+	}
+
+	var requests []*docs.Request
+	for find, replace := range replacements {
+		requests = append(requests, &docs.Request{
+			ReplaceAllText: &docs.ReplaceAllTextRequest{
+				ContainsText: &docs.SubstringMatchCriteria{
+					Text:      find,
+					MatchCase: true,
+				},
+				ReplaceText: replace,
+			},
+		})
+	}
+
+	var totalReplaced int
+	err := retryOnRateLimit(ctx, "ReplaceText", func() error {
+		resp, err := c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
+			Requests: requests,
+		}).Context(ctx).Do()
+		if err != nil {
+			return err
+		}
+		for _, r := range resp.Replies {
+			if r.ReplaceAllText != nil {
+				totalReplaced += int(r.ReplaceAllText.OccurrencesChanged)
+			}
+		}
+		return nil
+	})
+	return totalReplaced, err
+}
+
 // utf16Len returns the number of UTF-16 code units in a Go string.
 // Google Docs API uses UTF-16 code units for indexing, not bytes.
 func utf16Len(s string) int64 {

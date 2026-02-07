@@ -463,7 +463,92 @@ func (e *Exporter) ExportAll(ctx context.Context, conversations []config.Convers
 		}
 	}
 
+	// Second pass: resolve cross-conversation Slack links now that all docs exist
+	if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
+		e.Progress("Warning: cross-link resolution had errors: %v", err)
+	} else if replaced > 0 {
+		e.Progress("Resolved %d cross-conversation links", replaced)
+	}
+
 	return results, nil
+}
+
+// ResolveCrossLinks scans all exported docs for remaining Slack message links
+// and replaces them with Google Docs URLs using the now-complete index.
+// This handles forward references where conversation B was referenced in conversation A
+// before conversation B was exported.
+func (e *Exporter) ResolveCrossLinks(ctx context.Context) (int, error) {
+	if e.index == nil || e.gdriveClient == nil {
+		return 0, nil
+	}
+
+	totalReplaced := 0
+
+	for _, conv := range e.index.Conversations {
+		for _, doc := range conv.DailyDocs {
+			if doc.DocID == "" {
+				continue
+			}
+
+			replaced, err := e.resolveLinksInDoc(ctx, doc.DocID)
+			if err != nil {
+				if e.debug {
+					e.Progress("Warning: could not resolve links in doc %s: %v", doc.DocID, err)
+				}
+				continue
+			}
+			totalReplaced += replaced
+		}
+
+		// Also check thread docs
+		for _, thread := range conv.Threads {
+			for _, doc := range thread.DailyDocs {
+				if doc.DocID == "" {
+					continue
+				}
+
+				replaced, err := e.resolveLinksInDoc(ctx, doc.DocID)
+				if err != nil {
+					if e.debug {
+						e.Progress("Warning: could not resolve links in thread doc %s: %v", doc.DocID, err)
+					}
+					continue
+				}
+				totalReplaced += replaced
+			}
+		}
+	}
+
+	return totalReplaced, nil
+}
+
+// resolveLinksInDoc reads a doc, finds Slack links, and replaces them with Google Docs URLs.
+func (e *Exporter) resolveLinksInDoc(ctx context.Context, docID string) (int, error) {
+	content, err := e.gdriveClient.GetDocumentContent(ctx, docID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Find Slack links in the content
+	links := parser.FindSlackLinks(content)
+	if len(links) == 0 {
+		return 0, nil
+	}
+
+	// Build replacement map for links that can now be resolved
+	replacements := make(map[string]string)
+	for _, link := range links {
+		docsURL := e.index.LookupDocURL(link.ChannelID, link.MessageTS)
+		if docsURL != "" && docsURL != link.FullURL {
+			replacements[link.FullURL] = docsURL
+		}
+	}
+
+	if len(replacements) == 0 {
+		return 0, nil
+	}
+
+	return e.gdriveClient.ReplaceText(ctx, docID, replacements)
 }
 
 // GetRootFolderURL returns the URL of the root export folder.
