@@ -56,8 +56,12 @@ func Authenticate(ctx context.Context, cfg *Config) (*http.Client, error) {
 
 	// Try to load existing token
 	token, err := loadToken(cfg.TokenPath)
-	if err == nil && token.Valid() {
-		return oauthConfig.Client(ctx, token), nil
+	if err == nil {
+		// If the token is valid OR has a refresh token, use it.
+		// oauthConfig.Client() handles auto-refresh transparently.
+		if token.Valid() || token.RefreshToken != "" {
+			return oauthConfig.Client(ctx, token), nil
+		}
 	}
 
 	// Need to get new token via browser flow

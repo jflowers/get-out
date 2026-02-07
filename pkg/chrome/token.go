@@ -42,8 +42,9 @@ func (s *Session) ExtractCredentials(ctx context.Context) (*SlackCredentials, er
 	}
 
 	// Switch to the Slack tab
-	tabCtx, cancel := chromedp.NewContext(s.ctx, chromedp.WithTargetID(target.ID(slackTarget.TargetID)))
-	defer cancel()
+	// Note: We intentionally discard the cancel func. Calling cancel() would
+	// send Target.closeTarget to Chrome, closing the user's Slack tab.
+	tabCtx, _ := chromedp.NewContext(s.allocCtx, chromedp.WithTargetID(target.ID(slackTarget.TargetID)))
 
 	// Extract token from localStorage
 	var localConfigRaw string
@@ -130,9 +131,8 @@ func (s *Session) ExtractCredentialsForTeam(ctx context.Context, teamDomain stri
 		return nil, err
 	}
 
-	// Switch to the Slack tab
-	tabCtx, cancel := chromedp.NewContext(s.ctx, chromedp.WithTargetID(target.ID(slackTarget.TargetID)))
-	defer cancel()
+	// Switch to the Slack tab (don't cancel — that closes the tab)
+	tabCtx, _ := chromedp.NewContext(s.allocCtx, chromedp.WithTargetID(target.ID(slackTarget.TargetID)))
 
 	// Extract token from localStorage
 	var localConfigRaw string
@@ -188,8 +188,7 @@ func (s *Session) ListAvailableTeams(ctx context.Context) ([]TeamInfo, error) {
 		return nil, err
 	}
 
-	tabCtx, cancel := chromedp.NewContext(s.ctx, chromedp.WithTargetID(target.ID(slackTarget.TargetID)))
-	defer cancel()
+	tabCtx, _ := chromedp.NewContext(s.allocCtx, chromedp.WithTargetID(target.ID(slackTarget.TargetID)))
 
 	var localConfigRaw string
 	err = chromedp.Run(tabCtx,

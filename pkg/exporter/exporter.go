@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/jflowers/get-out/pkg/chrome"
@@ -90,6 +91,7 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 	gdriveCfg := gdrive.DefaultConfig(e.configDir)
 	if e.googleCredentialsFile != "" {
 		gdriveCfg.CredentialsPath = e.googleCredentialsFile
+		gdriveCfg.TokenPath = filepath.Join(filepath.Dir(e.googleCredentialsFile), "token.json")
 	}
 	gdriveClient, err := gdrive.NewClientFromConfig(ctx, gdriveCfg)
 	if err != nil {
@@ -144,6 +146,7 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 	gdriveCfg := gdrive.DefaultConfig(e.configDir)
 	if e.googleCredentialsFile != "" {
 		gdriveCfg.CredentialsPath = e.googleCredentialsFile
+		gdriveCfg.TokenPath = filepath.Join(filepath.Dir(e.googleCredentialsFile), "token.json")
 	}
 	gdriveClient, err := gdrive.NewClientFromConfig(ctx, gdriveCfg)
 	if err != nil {
@@ -165,10 +168,18 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 	return nil
 }
 
-// LoadUsers loads user data from Slack for name resolution.
-func (e *Exporter) LoadUsers(ctx context.Context) error {
-	e.Progress("Loading Slack users for name resolution...")
-	if err := e.userResolver.LoadUsers(ctx, e.slackClient); err != nil {
+// LoadUsersForConversations loads user data for the specific conversations being exported.
+func (e *Exporter) LoadUsersForConversations(ctx context.Context, channelIDs []string) error {
+	e.Progress("Loading users from %d conversations...", len(channelIDs))
+	if err := e.userResolver.LoadUsersForConversations(ctx, e.slackClient, channelIDs, func(id string, count int) {
+		if count < 0 {
+			e.Progress("Could not access members for %s (will resolve on-the-fly)", id)
+		} else if id == "users" {
+			e.Progress("Fetched %d user profiles...", count)
+		} else {
+			e.Progress("Found %d unique members so far...", count)
+		}
+	}); err != nil {
 		return fmt.Errorf("failed to load users: %w", err)
 	}
 	e.Progress("Loaded %d users", e.userResolver.Count())
@@ -349,8 +360,12 @@ func (e *Exporter) exportThread(ctx context.Context, convID string, parent slack
 
 // ExportAll exports all conversations in the provided list.
 func (e *Exporter) ExportAll(ctx context.Context, conversations []config.ConversationConfig) ([]*ExportResult, error) {
-	// Load users first for name resolution
-	if err := e.LoadUsers(ctx); err != nil {
+	// Collect channel IDs and load only users from those conversations
+	channelIDs := make([]string, len(conversations))
+	for i, conv := range conversations {
+		channelIDs[i] = conv.ID
+	}
+	if err := e.LoadUsersForConversations(ctx, channelIDs); err != nil {
 		return nil, err
 	}
 

@@ -229,6 +229,14 @@ type ConversationInfoResponse struct {
 	Channel Conversation `json:"channel"`
 }
 
+// MembersResponse is the response from conversations.members.
+type MembersResponse struct {
+	OK               bool             `json:"ok"`
+	Error            string           `json:"error,omitempty"`
+	Members          []string         `json:"members"`
+	ResponseMetadata ResponseMetadata `json:"response_metadata"`
+}
+
 // TSToTime converts a Slack timestamp to time.Time.
 func TSToTime(ts string) time.Time {
 	// Slack timestamps are Unix seconds with microseconds: "1234567890.123456"

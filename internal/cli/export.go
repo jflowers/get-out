@@ -155,13 +155,18 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	// Check prerequisites
 	gdriveCfg := gdrive.DefaultConfig(configDir)
+	if settings.GoogleCredentialsFile != "" {
+		gdriveCfg.CredentialsPath = settings.GoogleCredentialsFile
+		// Derive token path from the same directory as credentials
+		gdriveCfg.TokenPath = filepath.Join(filepath.Dir(settings.GoogleCredentialsFile), "token.json")
+	}
 	if !gdrive.HasCredentials(gdriveCfg) {
 		return fmt.Errorf("Google credentials not found at %s\n\nDownload credentials.json from Google Cloud Console", gdriveCfg.CredentialsPath)
 	}
 
 	if !gdrive.HasToken(gdriveCfg) {
 		fmt.Println("Google authorization required. Run 'get-out auth' first.")
-		return fmt.Errorf("no Google token found")
+		return fmt.Errorf("no Google token found at %s", gdriveCfg.TokenPath)
 	}
 
 	// Create context with cancellation

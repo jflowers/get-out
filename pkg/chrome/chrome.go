@@ -4,7 +4,10 @@ package chrome
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -16,6 +19,7 @@ type Session struct {
 	allocCancel context.CancelFunc
 	ctx         context.Context
 	cancel      context.CancelFunc
+	debugPort   int
 
 	// Extracted credentials
 	Token  string // xoxc token from localStorage
@@ -80,17 +84,21 @@ func Connect(ctx context.Context, cfg *Config) (*Session, error) {
 		allocCancel: allocCancel,
 		ctx:         browserCtx,
 		cancel:      cancel,
+		debugPort:   cfg.DebugPort,
 	}, nil
 }
 
 // Close releases all resources associated with the session.
+// It only closes the blank tab we created during Connect;
+// it does NOT close any pre-existing browser tabs (like the Slack tab).
 func (s *Session) Close() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	if s.allocCancel != nil {
-		s.allocCancel()
-	}
+	// Intentionally do NOT call allocCancel() here.
+	// Canceling the allocator cascades to all child contexts,
+	// which would close any attached tabs (including the Slack tab).
+	// For a CLI process, the allocator resources are cleaned up on exit.
 }
 
 // Context returns the chromedp context for running actions.
@@ -98,17 +106,45 @@ func (s *Session) Context() context.Context {
 	return s.ctx
 }
 
+// cdpTarget is the JSON structure returned by Chrome's /json/list endpoint.
+type cdpTarget struct {
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+}
+
 // ListTargets returns information about all browser tabs/targets.
+// Uses the CDP HTTP endpoint directly, which is more reliable than
+// chromedp.Targets() when connected to a remote browser.
 func (s *Session) ListTargets(ctx context.Context) ([]TargetInfo, error) {
-	targets, err := chromedp.Targets(s.ctx)
+	listURL := fmt.Sprintf("http://127.0.0.1:%d/json/list", s.debugPort)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list targets: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var targets []cdpTarget
+	if err := json.Unmarshal(body, &targets); err != nil {
+		return nil, fmt.Errorf("failed to parse targets: %w", err)
 	}
 
 	var result []TargetInfo
 	for _, t := range targets {
 		result = append(result, TargetInfo{
-			TargetID: string(t.TargetID),
+			TargetID: t.ID,
 			Type:     t.Type,
 			Title:    t.Title,
 			URL:      t.URL,

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -89,8 +90,35 @@ func (c *Client) Mode() AuthMode {
 	return c.mode
 }
 
-// request makes an API request to Slack.
+// request makes an API request to Slack with automatic rate-limit retry.
 func (c *Client) request(ctx context.Context, method, endpoint string, params url.Values, result interface{}) error {
+	const maxRetries = 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		err := c.doRequest(ctx, method, endpoint, params, result)
+		if err == nil {
+			return nil
+		}
+
+		// If rate-limited, wait and retry
+		rle, ok := err.(*RateLimitError)
+		if !ok || attempt == maxRetries {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(rle.RetryAfter):
+			fmt.Fprintf(os.Stderr, "  Rate limited on %s, waited %v (attempt %d/%d)\n", endpoint, rle.RetryAfter, attempt+1, maxRetries)
+		}
+	}
+
+	return fmt.Errorf("exhausted retries for %s", endpoint)
+}
+
+// doRequest performs a single API request to Slack.
+func (c *Client) doRequest(ctx context.Context, method, endpoint string, params url.Values, result interface{}) error {
 	u := fmt.Sprintf("%s/%s", c.baseURL, endpoint)
 
 	var body io.Reader
@@ -263,6 +291,27 @@ func (c *Client) GetUsers(ctx context.Context, cursor string) (*UsersListRespons
 
 	var resp UsersListResponse
 	if err := c.request(ctx, "POST", "users.list", params, &resp); err != nil {
+		return nil, err
+	}
+
+	if !resp.OK {
+		return nil, classifyError(resp.Error, 0)
+	}
+
+	return &resp, nil
+}
+
+// GetConversationMembers retrieves the member IDs of a conversation.
+func (c *Client) GetConversationMembers(ctx context.Context, channelID, cursor string) (*MembersResponse, error) {
+	params := url.Values{}
+	params.Set("channel", channelID)
+	params.Set("limit", "200")
+	if cursor != "" {
+		params.Set("cursor", cursor)
+	}
+
+	var resp MembersResponse
+	if err := c.request(ctx, "POST", "conversations.members", params, &resp); err != nil {
 		return nil, err
 	}
 

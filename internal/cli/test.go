@@ -38,7 +38,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	fmt.Println("=======================")
 	fmt.Println()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	// Connect to browser

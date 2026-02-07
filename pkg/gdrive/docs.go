@@ -3,6 +3,7 @@ package gdrive
 import (
 	"context"
 	"fmt"
+	"unicode/utf16"
 
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
@@ -160,7 +161,7 @@ func (c *Client) InsertFormattedContent(ctx context.Context, docID string, conte
 				textStyle.Link = &docs.Link{Url: fc.Link}
 			}
 
-			endIndex := index + int64(len(fc.Text))
+			endIndex := index + utf16Len(fc.Text)
 			requests = append(requests, &docs.Request{
 				UpdateTextStyle: &docs.UpdateTextStyleRequest{
 					Range: &docs.Range{
@@ -290,14 +291,14 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 			UpdateTextStyle: &docs.UpdateTextStyleRequest{
 				Range: &docs.Range{
 					StartIndex: currentIndex,
-					EndIndex:   currentIndex + int64(len(msg.SenderName)),
+					EndIndex:   currentIndex + utf16Len(msg.SenderName),
 				},
 				TextStyle: &docs.TextStyle{Bold: true},
 				Fields:    "bold",
 			},
 		})
 
-		currentIndex += int64(len(header))
+		currentIndex += utf16Len(header)
 
 		// Insert body
 		requests = append(requests, &docs.Request{
@@ -307,7 +308,7 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 			},
 		})
 
-		currentIndex += int64(len(body))
+		currentIndex += utf16Len(body)
 	}
 
 	// Execute batch update
@@ -326,4 +327,10 @@ type MessageBlock struct {
 	SenderName string
 	Timestamp  string
 	Content    string
+}
+
+// utf16Len returns the number of UTF-16 code units in a Go string.
+// Google Docs API uses UTF-16 code units for indexing, not bytes.
+func utf16Len(s string) int64 {
+	return int64(len(utf16.Encode([]rune(s))))
 }
