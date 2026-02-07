@@ -56,7 +56,7 @@ type ParsedSegment struct {
 // ConvertMrkdwn converts Slack mrkdwn to plain text with metadata about formatting.
 // This is a simplified version that returns plain text suitable for Google Docs.
 func ConvertMrkdwn(text string, userResolver *UserResolver, channelResolver *ChannelResolver) string {
-	result, _ := ConvertMrkdwnWithLinks(text, userResolver, channelResolver, nil)
+	result, _ := ConvertMrkdwnWithLinks(text, userResolver, channelResolver, nil, nil)
 	return result
 }
 
@@ -66,11 +66,22 @@ type LinkAnnotation struct {
 	URL  string // The link URL (e.g., "mailto:john@example.com")
 }
 
+// SlackLinkResolver resolves Slack message links to Google Docs URLs.
+// Given a channel ID and message timestamp, it returns the corresponding
+// Google Docs URL, or empty string if the target hasn't been exported.
+type SlackLinkResolver func(channelID, messageTS string) string
+
 // ConvertMrkdwnWithLinks converts Slack mrkdwn to plain text and returns link annotations
 // for @mentions that have Google email mappings via the PersonResolver.
-func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelResolver *ChannelResolver, personResolver *PersonResolver) (string, []LinkAnnotation) {
+// If slackLinkResolver is non-nil, Slack archive URLs are replaced with Google Docs URLs.
+func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelResolver *ChannelResolver, personResolver *PersonResolver, slackLinkResolver SlackLinkResolver) (string, []LinkAnnotation) {
 	result := text
 	var links []LinkAnnotation
+
+	// Replace Slack archive links with Google Docs links (before other URL processing)
+	if slackLinkResolver != nil {
+		result = ReplaceSlackLinks(result, slackLinkResolver)
+	}
 
 	// Replace user mentions — track link annotations for users with Google emails
 	result = userMentionPattern.ReplaceAllStringFunc(result, func(match string) string {

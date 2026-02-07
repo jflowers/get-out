@@ -145,7 +145,7 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 	e.loadPersonResolver()
 
 	// Create doc writer
-	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver)
+	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL)
 
 	return nil
 }
@@ -184,7 +184,7 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 	e.loadPersonResolver()
 
 	// Create doc writer
-	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver)
+	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL)
 
 	return nil
 }

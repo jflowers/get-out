@@ -17,15 +17,17 @@ type DocWriter struct {
 	userResolver    *parser.UserResolver
 	channelResolver *parser.ChannelResolver
 	personResolver  *parser.PersonResolver
+	linkResolver    parser.SlackLinkResolver
 }
 
 // NewDocWriter creates a new doc writer.
-func NewDocWriter(client *gdrive.Client, userResolver *parser.UserResolver, channelResolver *parser.ChannelResolver, personResolver *parser.PersonResolver) *DocWriter {
+func NewDocWriter(client *gdrive.Client, userResolver *parser.UserResolver, channelResolver *parser.ChannelResolver, personResolver *parser.PersonResolver, linkResolver parser.SlackLinkResolver) *DocWriter {
 	return &DocWriter{
 		client:          client,
 		userResolver:    userResolver,
 		channelResolver: channelResolver,
 		personResolver:  personResolver,
+		linkResolver:    linkResolver,
 	}
 }
 
@@ -67,7 +69,7 @@ func (w *DocWriter) messageToBlock(msg slackapi.Message) gdrive.MessageBlock {
 	timestamp := formatMessageTime(msg.TS)
 
 	// Convert message text and collect link annotations
-	content, links := parser.ConvertMrkdwnWithLinks(msg.Text, w.userResolver, w.channelResolver, w.personResolver)
+	content, links := parser.ConvertMrkdwnWithLinks(msg.Text, w.userResolver, w.channelResolver, w.personResolver, w.linkResolver)
 
 	// Convert parser.LinkAnnotation to gdrive.LinkAnnotation
 	var docLinks []gdrive.LinkAnnotation
