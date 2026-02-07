@@ -8,7 +8,10 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 - **API-based extraction**: Access public/private channels via Slack bot token
 - **Google Drive integration**: Creates organized folder hierarchy with daily Google Docs
 - **Thread support**: Exports threads to separate subfolders with linked references
-- **Resumable exports**: Checkpoint system allows resuming interrupted exports
+- **@Mention linking**: Converts `@mentions` to clickable Google email links in exported docs
+- **Slack link replacement**: Replaces Slack message URLs with links to the corresponding Google Docs
+- **Checkpoint/Resume**: Granular checkpointing after each doc — resume crashed exports with `--resume`
+- **Incremental sync**: `--sync` mode exports only new messages since last run
 - **Name resolution**: Converts Slack user IDs to real names in exported documents
 
 ## Prerequisites
@@ -198,6 +201,15 @@ Start Chrome with remote debugging, then test the connection:
 # Export specific conversations
 ./get-out export D06DDJ2UH2M C04KFBJTDJR --config ./config
 
+# Sync mode - export only new messages since last run
+./get-out export --sync --config ./config
+
+# Resume a crashed/interrupted export
+./get-out export --resume --config ./config
+
+# Export messages from a specific date range
+./get-out export --from 2024-01-01 --to 2024-06-30 --config ./config
+
 # With verbose output
 ./get-out export --config ./config -v
 
@@ -210,6 +222,14 @@ Start Chrome with remote debugging, then test the connection:
 # Export to an existing Google Drive folder by ID
 ./get-out export --folder-id 1ABC123xyz --config ./config
 ```
+
+### Check Export Status
+
+```bash
+./get-out status --config ./config
+```
+
+Shows conversation export progress: status (complete/in-progress), message counts, doc counts, and last updated time.
 
 ### Global Flags
 
@@ -258,15 +278,17 @@ get-out/
 ├── internal/cli/         # Command implementations
 │   ├── root.go           # Base command and global flags
 │   ├── auth.go           # Google OAuth command
+│   ├── discover.go       # Discover people from conversations
+│   ├── export.go         # Export command
 │   ├── list.go           # List conversations command
-│   ├── test.go           # Test browser connection
-│   └── export.go         # Export command
+│   ├── status.go         # Show export status
+│   └── test.go           # Test browser connection
 ├── pkg/
 │   ├── chrome/           # Chrome DevTools Protocol client
 │   ├── slackapi/         # Slack API client (browser + bot modes)
 │   ├── gdrive/           # Google Drive/Docs API client
 │   ├── exporter/         # Export orchestration and indexing
-│   ├── parser/           # Slack mrkdwn conversion
+│   ├── parser/           # Slack mrkdwn, user/person resolution
 │   ├── config/           # Configuration loading
 │   └── models/           # Shared data models
 ├── config/               # Example configuration files
