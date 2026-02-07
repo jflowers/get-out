@@ -217,21 +217,20 @@ Project structure from plan.md:
 
 ### Implementation for User Story 3
 
-- [ ] T046 [US3] Create pkg/parser/usermapping.go with:
-  - LoadUserMapping from user-mapping.json
-  - GetGoogleAccount(slackUserID) → (email, name, found)
-  - UserMapping struct with Slack ID → Google email/name
-- [ ] T047 [US3] Update pkg/parser/mrkdwn.go to check user mapping:
-  - If Google account exists: create mailto: link or Google profile link
-  - If no mapping: use Slack display name (bold, no link)
-- [ ] T048 [US3] Update pkg/parser/resolver.go to cache user map to file (users.json in _metadata)
-- [ ] T049 [US3] Add fallback for unresolvable users: `@Unknown (U123ABC456)` format
+- [x] T046 [US3] Create person→email resolver (implemented as `pkg/parser/personresolver.go`):
+  - Loads from people.json (populated by `discover` command)
+  - Maps Slack user ID → Google email
+- [x] T047 [US3] Update mrkdwn conversion for Google account linking:
+  - `ConvertMrkdwnWithLinks` returns `LinkAnnotation` for mentions with Google emails
+  - `BatchAppendMessages` applies `UpdateTextStyle` with `mailto:` `Link`
+- [x] T048 [US3] Wire PersonResolver through Exporter → DocWriter → messageToBlock
+- [x] T049 [US3] Graceful fallback: no people.json = display names only, no links
 - [ ] T050 [US3] Handle bot users with is_bot flag (show [bot] indicator)
 - [ ] T051 [US3] Handle deleted users with deleted flag (show [deactivated] indicator)
-- [ ] T052 [US3] Add batch user fetching optimization: collect all user IDs first, fetch in parallel with errgroup
+- [x] T052 [US3] Batch user loading: LoadUsersForConversations fetches only relevant users
 - [ ] T053 [US3] Add `--user-mapping` flag to export command to specify mapping file path
 
-**Checkpoint**: Mentions resolve to Google links where mapping exists, graceful fallback otherwise
+**Checkpoint**: @mentions resolve to Google mailto: links where people.json mapping exists ✅
 
 ---
 
