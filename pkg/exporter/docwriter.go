@@ -128,16 +128,26 @@ func (w *DocWriter) messageToBlock(msg slackapi.Message) gdrive.MessageBlock {
 }
 
 // getSenderName returns the display name for a message sender.
+// Appends [bot] for bot users and [deactivated] for deleted users.
 func (w *DocWriter) getSenderName(msg slackapi.Message) string {
 	// Check for bot messages with username
 	if msg.Username != "" {
-		return msg.Username
+		return msg.Username + " [bot]"
 	}
 
 	// Resolve user ID
 	if msg.User != "" {
 		if w.userResolver != nil {
-			return w.userResolver.Resolve(msg.User)
+			name := w.userResolver.Resolve(msg.User)
+			// Check for bot/deleted indicators
+			if user := w.userResolver.GetUser(msg.User); user != nil {
+				if user.IsBot || user.IsAppUser {
+					name += " [bot]"
+				} else if user.Deleted {
+					name += " [deactivated]"
+				}
+			}
+			return name
 		}
 		return msg.User
 	}

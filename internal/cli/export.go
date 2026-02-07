@@ -217,7 +217,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	// --to should be end of day (23:59:59)
 	if dateTo != "" {
 		ts, _ := strconv.ParseInt(dateTo[:len(dateTo)-7], 10, 64) // strip .000000
-		ts += 86400 - 1 // end of day
+		ts += 86400 - 1                                           // end of day
 		dateTo = fmt.Sprintf("%d.000000", ts)
 	}
 

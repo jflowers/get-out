@@ -128,10 +128,10 @@ func TestExportIndex_DailyDocs(t *testing.T) {
 
 	// Set a doc
 	idx.SetDailyDoc("C123", "2024-01-15", &DocExport{
-		DocID: "d1",
+		DocID:  "d1",
 		DocURL: "https://docs.google.com/document/d/d1",
-		Title: "2024-01-15",
-		Date:  "2024-01-15",
+		Title:  "2024-01-15",
+		Date:   "2024-01-15",
 	})
 
 	doc = idx.GetDailyDoc("C123", "2024-01-15")

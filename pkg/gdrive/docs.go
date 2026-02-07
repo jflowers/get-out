@@ -379,8 +379,8 @@ func utf16Len(s string) int64 {
 }
 
 const (
-	maxRetries     = 3
-	retryWaitSecs   = 60 // Google Docs quota resets per minute
+	maxRetries    = 3
+	retryWaitSecs = 60 // Google Docs quota resets per minute
 )
 
 // retryOnRateLimit retries a Google API call on 429 rate limit errors.
