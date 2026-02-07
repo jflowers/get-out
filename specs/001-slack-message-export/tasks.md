@@ -1,7 +1,8 @@
 # Tasks: Slack Message Export to Google Docs
 
 **Input**: Design documents from `/specs/001-slack-message-export/`  
-**Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/slack-api.md, quickstart.md
+**Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/slack-api.md, quickstart.md  
+**Last Updated**: 2026-02-07
 
 **Tests**: Test tasks included for core functionality (parser, checkpoint, API clients).
 
@@ -26,14 +27,14 @@ Project structure from plan.md:
 
 **Purpose**: Initialize Go project structure and dependencies
 
-- [ ] T001 Create project directory structure per plan.md (cmd/, pkg/, internal/, tests/)
-- [ ] T002 Initialize go.mod with module `github.com/jflowers/get-out` and Go 1.21+
-- [ ] T003 [P] Add chromedp dependency `github.com/chromedp/chromedp v0.9.5`
-- [ ] T004 [P] Add cobra dependency `github.com/spf13/cobra v1.8.0`
-- [ ] T005 [P] Add errgroup dependency `golang.org/x/sync v0.6.0`
-- [ ] T006 [P] Add Google API dependencies `google.golang.org/api v0.160.0` and `golang.org/x/oauth2 v0.16.0`
-- [ ] T007 Create pkg/models/models.go with domain types from data-model.md (Conversation, Message, User, Reaction, Attachment, ExportSession, UserMapping, ExportIndex)
-- [ ] T008 Create .gitignore for Go project (binaries, .env, credentials.json, token.json, user-mapping.json)
+- [x] T001 Create project directory structure per plan.md (cmd/, pkg/, internal/, tests/)
+- [x] T002 Initialize go.mod with module `github.com/jflowers/get-out` and Go 1.21+
+- [x] T003 [P] Add chromedp dependency `github.com/chromedp/chromedp v0.9.5`
+- [x] T004 [P] Add cobra dependency `github.com/spf13/cobra v1.8.0`
+- [x] T005 [P] Add errgroup dependency `golang.org/x/sync v0.6.0`
+- [x] T006 [P] Add Google API dependencies `google.golang.org/api v0.160.0` and `golang.org/x/oauth2 v0.16.0`
+- [x] T007 Create pkg/models/models.go with domain types from data-model.md (Conversation, Message, User, Reaction, Attachment, ExportSession, UserMapping, ExportIndex)
+- [x] T008 Create .gitignore for Go project (binaries, .env, credentials.json, token.json, user-mapping.json)
 
 **Checkpoint**: Project compiles with `go build ./...`
 
@@ -47,11 +48,11 @@ Project structure from plan.md:
 
 ### Config Loading
 
-- [ ] T009 Create pkg/config/types.go with config struct definitions:
+- [x] T009 Create pkg/config/types.go with config struct definitions:
   - Conversation struct (id, name, type, mode, export, share, shareMembers)
   - Person struct (slackId, email, displayName, googleEmail, noNotifications, noShare)
   - ConversationsConfig and PeopleConfig wrapper structs
-- [ ] T010 Create pkg/config/config.go with config file loading:
+- [x] T010 Create pkg/config/config.go with config file loading:
   - LoadConversations(path) for conversations.json
   - LoadPeople(path) for people.json
   - Validation functions for config data
@@ -59,28 +60,28 @@ Project structure from plan.md:
 
 ### Slack Infrastructure
 
-- [ ] T011 Create pkg/chrome/chrome.go with RemoteAllocator connection to Chrome debugging port
-- [ ] T012 Create pkg/chrome/token.go with ExtractToken function to get xoxc token from localStorage
-- [ ] T013 Create pkg/slackapi/types.go with API response types (ConversationsListResponse, HistoryResponse, etc.)
-- [ ] T014 Create pkg/slackapi/client.go with base HTTP client supporting both auth modes:
+- [x] T011 Create pkg/chrome/chrome.go with RemoteAllocator connection to Chrome debugging port
+- [x] T012 Create pkg/chrome/token.go with ExtractToken function to get xoxc token from localStorage
+- [x] T013 Create pkg/slackapi/types.go with API response types (ConversationsListResponse, HistoryResponse, etc.)
+- [x] T014 Create pkg/slackapi/client.go with base HTTP client supporting both auth modes:
   - NewBrowserClient(xoxcToken, xoxdCookie) for browser mode
   - NewAPIClient(xoxbToken) for API mode
   - Common request/response handling
-- [ ] T015 [P] Create pkg/slackapi/errors.go with error types (RateLimitError, AuthError, NotFoundError)
+- [x] T015 [P] Create pkg/slackapi/errors.go with error types (RateLimitError, AuthError, NotFoundError)
 
 ### Google Drive Infrastructure
 
-- [ ] T014 Create pkg/gdrive/auth.go with OAuth 2.0 flow:
+- [x] T014 Create pkg/gdrive/auth.go with OAuth 2.0 flow:
   - Load credentials.json from config directory
   - Browser-based consent flow for first auth
   - Save/load refresh token to token.json
   - Auto-refresh access token on expiry
-- [ ] T015 Create pkg/gdrive/client.go with Google Drive/Docs service initialization
-- [ ] T016 Create pkg/gdrive/folder.go with folder management:
+- [x] T015 Create pkg/gdrive/client.go with Google Drive/Docs service initialization
+- [x] T016 Create pkg/gdrive/folder.go with folder management:
   - CreateFolder function with parent folder support
   - FindOrCreateFolder for nested folder creation
   - GetFolderID by name and parent
-- [ ] T017 Create pkg/gdrive/docs.go with Google Docs creation:
+- [x] T017 Create pkg/gdrive/docs.go with Google Docs creation:
   - CreateDocument with title in specific folder
   - BatchUpdate for content insertion
   - Text formatting helpers (bold, italic, monospace, hyperlinks)
@@ -88,11 +89,11 @@ Project structure from plan.md:
 
 ### Export Index & Structure
 
-- [ ] T018 Create pkg/exporter/index.go with ExportIndex management:
+- [x] T018 Create pkg/exporter/index.go with ExportIndex management:
   - Load/save export-index.json from _metadata folder
   - Track conversation folders, thread docs, daily docs
   - Lookup methods for link replacement
-- [ ] T019 Create pkg/exporter/structure.go with folder organization:
+- [x] T019 Create pkg/exporter/structure.go with folder organization:
   - CreateConversationFolder (e.g., "DM - John Smith")
   - CreateThreadsSubfolder
   - CreateDailyDoc with date-based naming
@@ -100,10 +101,10 @@ Project structure from plan.md:
 
 ### CLI Base
 
-- [ ] T020 Create internal/cli/root.go with Cobra root command and global flags (--debug, --chrome-port)
-- [ ] T021 Create internal/cli/auth.go with `auth` command for Google OAuth setup
-- [ ] T022 Create cmd/get-out/main.go entry point that calls internal/cli/root.go
-- [ ] T023 Create internal/cli/discover.go with `discover` command:
+- [x] T020 Create internal/cli/root.go with Cobra root command and global flags (--debug, --chrome-port)
+- [x] T021 Create internal/cli/auth.go with `auth` command for Google OAuth setup
+- [x] T022 Create cmd/get-out/main.go entry point that calls internal/cli/root.go
+- [x] T023 Create internal/cli/discover.go with `discover` command:
   - Read conversations.json to get list of configured conversations
   - For each conversation, fetch member list from Slack API
   - Fetch user info (name, email, display name) for all members
@@ -127,28 +128,28 @@ Project structure from plan.md:
 
 ### Tests for User Story 1
 
-- [ ] T023 [P] [US1] Create tests/unit/parser_test.go with mrkdwn to Docs conversion tests (mentions, links, formatting)
-- [ ] T024 [P] [US1] Create tests/unit/resolver_test.go with user ID resolution tests
-- [ ] T025 [P] [US1] Create tests/integration/slackapi_test.go with mock HTTP server for conversations.history
+- [x] T023 [P] [US1] Create tests/unit/parser_test.go with mrkdwn to Docs conversion tests (mentions, links, formatting)
+- [x] T024 [P] [US1] Create tests/unit/resolver_test.go with user ID resolution tests
+- [x] T025 [P] [US1] Create tests/integration/slackapi_test.go with mock HTTP server for conversations.history
 - [ ] T026 [P] [US1] Create tests/unit/gdrive_test.go with Docs formatting request tests
-- [ ] T027 [P] [US1] Create tests/unit/index_test.go with export index save/load tests
+- [x] T027 [P] [US1] Create tests/unit/index_test.go with export index save/load tests
 
 ### Implementation for User Story 1
 
-- [ ] T028 [US1] Implement pkg/slackapi/conversations.go with ListConversations and GetHistory methods
-- [ ] T029 [US1] Implement pkg/slackapi/users.go with GetUser and ListUsers methods
-- [ ] T030 [US1] Create pkg/parser/resolver.go with UserResolver that builds ID→name map from users.list
-- [ ] T031 [US1] Create pkg/parser/mrkdwn.go with ConvertToDocsRequests function:
+- [x] T028 [US1] Implement pkg/slackapi/conversations.go with ListConversations and GetHistory methods
+- [x] T029 [US1] Implement pkg/slackapi/users.go with GetUser and ListUsers methods
+- [x] T030 [US1] Create pkg/parser/resolver.go with UserResolver that builds ID→name map from users.list
+- [x] T031 [US1] Create pkg/parser/mrkdwn.go with ConvertToDocsRequests function:
   - Convert `<@U123>` to `@Real Name` (bold text)
   - Convert `<#C123|channel>` to `#channel`
   - Convert `<url|text>` to hyperlink
   - Convert code blocks to monospace font (Courier New)
   - Return slice of Google Docs API requests
-- [ ] T032 [US1] Create pkg/exporter/docwriter.go with:
+- [x] T032 [US1] Create pkg/exporter/docwriter.go with:
   - WriteDailyDoc: create doc for a single day's messages
   - Group messages by sender with timestamps
   - Batch formatting requests for efficiency
-- [ ] T033 [US1] Create pkg/exporter/exporter.go with ExportConversation orchestrator:
+- [x] T033 [US1] Create pkg/exporter/exporter.go with ExportConversation orchestrator:
   - Extract Slack token via chrome package
   - Verify Google auth via gdrive package
   - Create conversation folder structure
@@ -157,12 +158,12 @@ Project structure from plan.md:
   - Group messages by date
   - Create daily docs for each date
   - Update export index with created docs
-- [ ] T034 [US1] Create internal/cli/export.go with `export` command:
+- [x] T034 [US1] Create internal/cli/export.go with `export` command:
   - Accept conversation ID as argument
   - `--folder` flag for Drive root folder name (default: "Slack Exports")
   - Progress output during export (messages fetched, docs created)
   - Print folder URL on completion
-- [ ] T035 [US1] Add basic error handling in exporter (auth failures, not found, network errors)
+- [x] T035 [US1] Add basic error handling in exporter (auth failures, not found, network errors)
 
 **Checkpoint**: Can export a DM conversation to a folder with daily Google Docs
 
@@ -186,19 +187,19 @@ Project structure from plan.md:
 
 ### Implementation for User Story 2
 
-- [ ] T038 [US2] Implement pkg/slackapi/replies.go with GetReplies method for conversations.replies endpoint
-- [ ] T039 [US2] Update pkg/exporter/exporter.go to detect threaded messages (thread_ts field present)
-- [ ] T040 [US2] Add thread fetching logic: for each parent message with replies, fetch via GetReplies
-- [ ] T041 [US2] Create pkg/exporter/threadwriter.go with:
+- [x] T038 [US2] Implement pkg/slackapi/replies.go with GetReplies method for conversations.replies endpoint
+- [x] T039 [US2] Update pkg/exporter/exporter.go to detect threaded messages (thread_ts field present)
+- [x] T040 [US2] Add thread fetching logic: for each parent message with replies, fetch via GetReplies
+- [x] T041 [US2] Create pkg/exporter/threadwriter.go with:
   - ExtractTopicPreview: first 30 chars of parent message, sanitized for folder name
   - CreateThreadFolder: create folder in Threads subfolder named `{date} - {topic}`
   - GroupRepliesByDate: organize thread replies by date
   - WriteThreadDailyDocs: create daily docs within thread folder (same pattern as main)
-- [ ] T042 [US2] Update pkg/exporter/docwriter.go to add thread links:
+- [x] T042 [US2] Update pkg/exporter/docwriter.go to add thread links:
   - When parent message has replies, add "[View thread: N replies]" link
   - Link points to the thread folder in Threads subfolder
-- [ ] T043 [US2] Update export index with thread folder and doc entries (conversation_id:thread_ts → folder URL, daily doc URLs)
-- [ ] T044 [US2] Handle pagination in thread replies (has_more, cursor)
+- [x] T043 [US2] Update export index with thread folder and doc entries (conversation_id:thread_ts → folder URL, daily doc URLs)
+- [x] T044 [US2] Handle pagination in thread replies (has_more, cursor)
 
 **Checkpoint**: Can export conversations with threads properly organized in subfolders with cross-links
 
@@ -278,16 +279,16 @@ Project structure from plan.md:
 
 ### Implementation for User Story 5
 
-- [ ] T062 [US5] Update pkg/slackapi/client.go with rate limit detection (429 status, ratelimited error)
-- [ ] T063 [US5] Implement exponential backoff in Slack client: initial 1s, max 60s, respect Retry-After header
-- [ ] T064 [US5] Update pkg/gdrive/client.go with rate limit handling for Google APIs (429/503)
+- [x] T062 [US5] Update pkg/slackapi/client.go with rate limit detection (429 status, ratelimited error)
+- [x] T063 [US5] Implement exponential backoff in Slack client: initial 1s, max 60s, respect Retry-After header
+- [x] T064 [US5] Update pkg/gdrive/docs.go with rate limit handling for Google APIs (429)
 - [ ] T065 [US5] Create pkg/exporter/checkpoint.go with SaveCheckpoint and LoadCheckpoint:
   - State: conversation_id, last_ts, messages_exported, current_date, folder_id, status
   - Save after each daily doc is created
   - File: `.checkpoint.json` in config directory
 - [ ] T066 [US5] Update pkg/exporter/exporter.go to check for existing checkpoint on start
 - [ ] T067 [US5] Add `--resume` flag to export command that loads checkpoint and continues
-- [ ] T068 [US5] Add progress reporting: show message count, docs created, rate limit waits, ETA
+- [x] T068 [US5] Add progress reporting: show message count, docs created, rate limit waits, ETA
 
 **Checkpoint**: Large exports survive rate limits and interruptions; can resume seamlessly
 
@@ -311,7 +312,7 @@ Project structure from plan.md:
 - [ ] T075 Add Google token refresh check before each export
 - [ ] T076 [P] Update README.md with installation, Google Cloud setup, user-mapping.json format, and usage
 - [ ] T077 [P] Update quickstart.md with full workflow including threads and user mapping
-- [ ] T078 Add `--since` and `--until` date filters to export command
+- [x] T078 Add `--from` and `--to` date filters and `--sync` incremental export to export command
 - [ ] T079 Final code cleanup: remove debug prints, add comments, format with gofmt
 
 **Checkpoint**: Production-ready CLI tool with all documented features working
@@ -372,8 +373,8 @@ Phase 8 (Polish)
 1. Complete Phase 1: Setup (T001-T008)
 2. Complete Phase 2: Foundational (T009-T022)
 3. Complete Phase 3: User Story 1 (T023-T035)
-4. **STOP and VALIDATE**: Export a real DM conversation to Google Docs folder with daily docs
-5. **MVP READY**: Basic DM export with folder structure works
+4. **STOP and VALIDATE**: Export a real DM conversation to Google Docs folder with daily docs ✅ (1,094 msgs → 149 docs)
+5. **MVP READY**: Basic DM export with folder structure works ✅
 
 ### Incremental Delivery
 

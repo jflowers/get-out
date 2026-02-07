@@ -2,7 +2,8 @@
 
 **Feature Branch**: `001-slack-message-export`  
 **Created**: 2026-02-03  
-**Status**: Draft  
+**Status**: In Progress (MVP complete, US1+US2+US5 partial done)  
+**Last Updated**: 2026-02-07  
 **Input**: User description: "Build a CLI tool that exports Slack DMs and group threads to Google Docs in Google Drive using session-driven extraction from an active browser session"
 
 ## User Scenarios & Testing *(mandatory)*
