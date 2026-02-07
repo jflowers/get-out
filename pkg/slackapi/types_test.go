@@ -105,11 +105,12 @@ func TestTSToTime(t *testing.T) {
 }
 
 func TestTSToTime_CorrectDate(t *testing.T) {
-	// 1706745603 = 2024-01-31 (UTC)
+	// 1706745603 = 2024-02-01 00:00:03 UTC
 	got := TSToTime("1706745603.000000")
-	expected := time.Date(2024, 1, 31, 0, 0, 0, 0, time.UTC)
+	gotUTC := got.UTC()
+	expected := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 
-	if got.Year() != expected.Year() || got.Month() != expected.Month() || got.Day() != expected.Day() {
-		t.Errorf("TSToTime(1706745603) date = %s, want 2024-01-31", got.Format("2006-01-02"))
+	if gotUTC.Year() != expected.Year() || gotUTC.Month() != expected.Month() || gotUTC.Day() != expected.Day() {
+		t.Errorf("TSToTime(1706745603) date = %s, want 2024-02-01", gotUTC.Format("2006-01-02"))
 	}
 }
