@@ -21,9 +21,10 @@ var (
 	exportFolderID string
 	exportDryRun   bool
 	exportResume   bool
-	exportFrom     string
-	exportTo       string
-	exportSync     bool
+	exportFrom        string
+	exportTo          string
+	exportSync        bool
+	exportUserMapping string
 )
 
 var exportCmd = &cobra.Command{
@@ -74,6 +75,7 @@ func init() {
 	exportCmd.Flags().StringVar(&exportFrom, "from", "", "Export messages from this date (YYYY-MM-DD)")
 	exportCmd.Flags().StringVar(&exportTo, "to", "", "Export messages up to this date (YYYY-MM-DD)")
 	exportCmd.Flags().BoolVar(&exportSync, "sync", false, "Only export messages since last successful export")
+	exportCmd.Flags().StringVar(&exportUserMapping, "user-mapping", "", "Path to people.json for @mention linking (default: <config-dir>/people.json)")
 	rootCmd.AddCommand(exportCmd)
 }
 
@@ -103,6 +105,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	// Load people config (optional)
 	peoplePath := filepath.Join(configDir, "people.json")
+	if exportUserMapping != "" {
+		peoplePath = exportUserMapping
+	}
 	people, err := config.LoadPeople(peoplePath)
 	if err != nil {
 		if debugMode {
