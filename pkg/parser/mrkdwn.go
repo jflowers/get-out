@@ -56,22 +56,51 @@ type ParsedSegment struct {
 // ConvertMrkdwn converts Slack mrkdwn to plain text with metadata about formatting.
 // This is a simplified version that returns plain text suitable for Google Docs.
 func ConvertMrkdwn(text string, userResolver *UserResolver, channelResolver *ChannelResolver) string {
-	result := text
+	result, _ := ConvertMrkdwnWithLinks(text, userResolver, channelResolver, nil)
+	return result
+}
 
-	// Replace user mentions
+// LinkAnnotation records a substring in converted text that should become a hyperlink.
+type LinkAnnotation struct {
+	Text string // The display text (e.g., "@John Smith")
+	URL  string // The link URL (e.g., "mailto:john@example.com")
+}
+
+// ConvertMrkdwnWithLinks converts Slack mrkdwn to plain text and returns link annotations
+// for @mentions that have Google email mappings via the PersonResolver.
+func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelResolver *ChannelResolver, personResolver *PersonResolver) (string, []LinkAnnotation) {
+	result := text
+	var links []LinkAnnotation
+
+	// Replace user mentions — track link annotations for users with Google emails
 	result = userMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := userMentionPattern.FindStringSubmatch(match)
 		if len(matches) >= 2 {
 			userID := matches[1]
-			// If display name is provided in the mention, use it
+			displayName := ""
+
+			// Get display name
 			if len(matches) >= 3 && matches[2] != "" {
-				return "@" + matches[2]
+				displayName = matches[2]
+			} else if userResolver != nil {
+				displayName = userResolver.Resolve(userID)
+			} else {
+				displayName = userID
 			}
-			// Otherwise resolve the user ID
-			if userResolver != nil {
-				return "@" + userResolver.Resolve(userID)
+
+			mention := "@" + displayName
+
+			// Check for Google email link
+			if personResolver != nil {
+				if email := personResolver.ResolveEmail(userID); email != "" {
+					links = append(links, LinkAnnotation{
+						Text: mention,
+						URL:  "mailto:" + email,
+					})
+				}
 			}
-			return "@" + userID
+
+			return mention
 		}
 		return match
 	})
@@ -80,11 +109,9 @@ func ConvertMrkdwn(text string, userResolver *UserResolver, channelResolver *Cha
 	result = channelMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := channelMentionPattern.FindStringSubmatch(match)
 		if len(matches) >= 2 {
-			// If channel name is provided, use it
 			if len(matches) >= 3 && matches[2] != "" {
 				return "#" + matches[2]
 			}
-			// Otherwise resolve the channel ID
 			channelID := matches[1]
 			if channelResolver != nil {
 				return "#" + channelResolver.Resolve(channelID)
@@ -122,7 +149,6 @@ func ConvertMrkdwn(text string, userResolver *UserResolver, channelResolver *Cha
 	})
 
 	// Remove formatting markers but keep text
-	// (For Google Docs, we'll apply formatting separately)
 	result = boldPattern.ReplaceAllString(result, "$1")
 	result = italicPattern.ReplaceAllString(result, "$1")
 	result = strikePattern.ReplaceAllString(result, "$1")
@@ -134,7 +160,7 @@ func ConvertMrkdwn(text string, userResolver *UserResolver, channelResolver *Cha
 	// Decode HTML entities
 	result = decodeHTMLEntities(result)
 
-	return result
+	return result, links
 }
 
 // ParseMrkdwnSegments parses Slack mrkdwn into segments with formatting metadata.

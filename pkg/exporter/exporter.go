@@ -31,6 +31,7 @@ type Exporter struct {
 	docWriter       *DocWriter
 	userResolver    *parser.UserResolver
 	channelResolver *parser.ChannelResolver
+	personResolver  *parser.PersonResolver
 	index           *ExportIndex
 
 	// Progress callback
@@ -140,8 +141,11 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 		RootFolderID:   e.rootFolderID,
 	})
 
+	// Load person resolver from people.json
+	e.loadPersonResolver()
+
 	// Create doc writer
-	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver)
+	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver)
 
 	return nil
 }
@@ -176,10 +180,27 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 		RootFolderID:   e.rootFolderID,
 	})
 
+	// Load person resolver from people.json
+	e.loadPersonResolver()
+
 	// Create doc writer
-	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver)
+	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver)
 
 	return nil
+}
+
+// loadPersonResolver loads people.json and creates a PersonResolver for @mention linking.
+func (e *Exporter) loadPersonResolver() {
+	peoplePath := filepath.Join(e.configDir, "people.json")
+	people, err := config.LoadPeople(peoplePath)
+	if err != nil {
+		e.Progress("Note: people.json not found, @mentions won't have Google links")
+		return
+	}
+	e.personResolver = parser.NewPersonResolver(people)
+	if e.personResolver.Count() > 0 {
+		e.Progress("Loaded %d person→email mappings for @mention linking", e.personResolver.Count())
+	}
 }
 
 // LoadUsersForConversations loads user data for the specific conversations being exported.

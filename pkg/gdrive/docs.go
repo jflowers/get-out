@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 	"unicode/utf16"
 
@@ -309,6 +310,7 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 		currentIndex += utf16Len(header)
 
 		// Insert body
+		bodyStart := currentIndex
 		requests = append(requests, &docs.Request{
 			InsertText: &docs.InsertTextRequest{
 				Location: &docs.Location{Index: currentIndex},
@@ -317,6 +319,30 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 		})
 
 		currentIndex += utf16Len(body)
+
+		// Apply link annotations within the body
+		if len(msg.Links) > 0 {
+			// Search for each link annotation text in the body and apply hyperlink
+			for _, link := range msg.Links {
+				idx := strings.Index(body, link.Text)
+				if idx >= 0 {
+					linkStart := bodyStart + utf16Len(body[:idx])
+					linkEnd := linkStart + utf16Len(link.Text)
+					requests = append(requests, &docs.Request{
+						UpdateTextStyle: &docs.UpdateTextStyleRequest{
+							Range: &docs.Range{
+								StartIndex: linkStart,
+								EndIndex:   linkEnd,
+							},
+							TextStyle: &docs.TextStyle{
+								Link: &docs.Link{Url: link.URL},
+							},
+							Fields: "link",
+						},
+					})
+				}
+			}
+		}
 	}
 
 	// Execute batch update
@@ -332,11 +358,18 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 	return nil
 }
 
+// LinkAnnotation records a substring in message content that should be hyperlinked.
+type LinkAnnotation struct {
+	Text string // The display text to find
+	URL  string // The hyperlink URL
+}
+
 // MessageBlock represents a formatted message to insert into a doc.
 type MessageBlock struct {
 	SenderName string
 	Timestamp  string
 	Content    string
+	Links      []LinkAnnotation // Optional hyperlinks within Content
 }
 
 // utf16Len returns the number of UTF-16 code units in a Go string.
