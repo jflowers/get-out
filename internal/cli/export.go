@@ -13,18 +13,22 @@ import (
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/exporter"
 	"github.com/jflowers/get-out/pkg/gdrive"
+	"github.com/jflowers/get-out/pkg/models"
 	"github.com/spf13/cobra"
 )
 
 var (
-	exportFolder   string
-	exportFolderID string
-	exportDryRun   bool
-	exportResume   bool
+	exportFolder      string
+	exportFolderID    string
+	exportDryRun      bool
+	exportResume      bool
 	exportFrom        string
 	exportTo          string
 	exportSync        bool
 	exportUserMapping string
+	exportAllDMs      bool
+	exportAllGroups   bool
+	exportParallel    int
 )
 
 var exportCmd = &cobra.Command{
@@ -63,7 +67,14 @@ Examples:
   get-out export --from 2025-01-01 --to 2025-06-30
 
   # Incremental sync - only new messages since last export
-  get-out export --sync`,
+  get-out export --sync
+
+  # Export all DMs or group messages
+  get-out export --all-dms
+  get-out export --all-groups
+
+  # Export in parallel (max 3 concurrent)
+  get-out export --parallel 3`,
 	RunE: runExport,
 }
 
@@ -76,6 +87,9 @@ func init() {
 	exportCmd.Flags().StringVar(&exportTo, "to", "", "Export messages up to this date (YYYY-MM-DD)")
 	exportCmd.Flags().BoolVar(&exportSync, "sync", false, "Only export messages since last successful export")
 	exportCmd.Flags().StringVar(&exportUserMapping, "user-mapping", "", "Path to people.json for @mention linking (default: <config-dir>/people.json)")
+	exportCmd.Flags().BoolVar(&exportAllDMs, "all-dms", false, "Export all DM conversations")
+	exportCmd.Flags().BoolVar(&exportAllGroups, "all-groups", false, "Export all group (MPIM) conversations")
+	exportCmd.Flags().IntVar(&exportParallel, "parallel", 1, "Number of conversations to export concurrently (max 5)")
 	rootCmd.AddCommand(exportCmd)
 }
 
@@ -127,6 +141,12 @@ func runExport(cmd *cobra.Command, args []string) error {
 			}
 			toExport = append(toExport, *conv)
 		}
+	} else if exportAllDMs {
+		// Export all DM conversations
+		toExport = cfg.FilterByType(models.ConversationTypeDM)
+	} else if exportAllGroups {
+		// Export all group (MPIM) conversations
+		toExport = cfg.FilterByType(models.ConversationTypeMPIM)
 	} else {
 		// Export all with export=true
 		toExport = cfg.FilterByExport()
@@ -256,7 +276,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	fmt.Println("Starting export...")
 	fmt.Println()
 
-	results, err := exp.ExportAll(ctx, toExport)
+	results, err := exp.ExportAllParallel(ctx, toExport, exportParallel)
 	if err != nil {
 		return fmt.Errorf("export failed: %w", err)
 	}
