@@ -296,19 +296,19 @@ Project structure from plan.md:
 
 **Purpose**: CLI completeness, documentation, and production readiness
 
-- [ ] T069 Create internal/cli/list.go with `list` command:
+- [x] T069 Create internal/cli/list.go with `list` command:
   - Show all DMs, groups, channels user has access to
   - Format: ID, name, type, member count
   - `--type` filter flag (dm, group, channel)
-- [ ] T070 Create internal/cli/status.go with `status` command:
-  - Show active/paused exports from checkpoints
-  - Display progress, folder URL, and last update time
+- [x] T070 Create internal/cli/status.go with `status` command:
+  - Show exported conversations from index
+  - Display status, message count, doc count, thread count, last updated
 - [ ] T071 Add `--all-dms` flag to export command for batch DM export
 - [ ] T072 Add `--all-groups` flag to export command for batch group export
 - [ ] T073 Implement parallel conversation export with semaphore (max 3 concurrent)
 - [ ] T074 Add session expiry detection in chrome package (clear error message)
 - [ ] T075 Add Google token refresh check before each export
-- [ ] T076 [P] Update README.md with installation, Google Cloud setup, user-mapping.json format, and usage
+- [x] T076 [P] Update README.md with features, commands, project structure, and usage examples
 - [ ] T077 [P] Update quickstart.md with full workflow including threads and user mapping
 - [x] T078 Add `--from` and `--to` date filters and `--sync` incremental export to export command
 - [ ] T079 Final code cleanup: remove debug prints, add comments, format with gofmt
