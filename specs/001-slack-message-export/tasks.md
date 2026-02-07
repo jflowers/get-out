@@ -225,8 +225,8 @@ Project structure from plan.md:
   - `BatchAppendMessages` applies `UpdateTextStyle` with `mailto:` `Link`
 - [x] T048 [US3] Wire PersonResolver through Exporter → DocWriter → messageToBlock
 - [x] T049 [US3] Graceful fallback: no people.json = display names only, no links
-- [ ] T050 [US3] Handle bot users with is_bot flag (show [bot] indicator)
-- [ ] T051 [US3] Handle deleted users with deleted flag (show [deactivated] indicator)
+- [x] T050 [US3] Handle bot users: [bot] indicator for IsBot/IsAppUser
+- [x] T051 [US3] Handle deleted users: [deactivated] indicator for Deleted flag
 - [x] T052 [US3] Batch user loading: LoadUsersForConversations fetches only relevant users
 - [ ] T053 [US3] Add `--user-mapping` flag to export command to specify mapping file path
 
@@ -309,9 +309,9 @@ Project structure from plan.md:
 - [ ] T074 Add session expiry detection in chrome package (clear error message)
 - [ ] T075 Add Google token refresh check before each export
 - [x] T076 [P] Update README.md with features, commands, project structure, and usage examples
-- [ ] T077 [P] Update quickstart.md with full workflow including threads and user mapping
+- [x] T077 [P] Update quickstart.md with full workflow, threads, user mapping, and all current features
 - [x] T078 Add `--from` and `--to` date filters and `--sync` incremental export to export command
-- [ ] T079 Final code cleanup: remove debug prints, add comments, format with gofmt
+- [x] T079 Final code cleanup: gofmt applied to all Go files
 
 **Checkpoint**: Production-ready CLI tool with all documented features working
 
