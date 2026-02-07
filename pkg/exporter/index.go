@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -175,6 +176,20 @@ func (idx *ExportIndex) SetConversation(conv *ConversationExport) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 	idx.Conversations[conv.ID] = conv
+}
+
+// AllConversations returns all conversation exports sorted by name.
+func (idx *ExportIndex) AllConversations() []*ConversationExport {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	convs := make([]*ConversationExport, 0, len(idx.Conversations))
+	for _, c := range idx.Conversations {
+		convs = append(convs, c)
+	}
+	sort.Slice(convs, func(i, j int) bool {
+		return convs[i].Name < convs[j].Name
+	})
+	return convs
 }
 
 // GetOrCreateConversation returns an existing conversation export or creates a new one.

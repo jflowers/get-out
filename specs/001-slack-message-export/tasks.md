@@ -246,22 +246,22 @@ Project structure from plan.md:
 
 ### Implementation for User Story 4
 
-- [ ] T055 [US4] Create pkg/parser/linkreplacer.go with:
-  - ParseSlackLink: extract conversation ID, timestamp, thread_ts from Slack URLs
-  - ReplaceSlackLinks: find all Slack links in message, replace with Drive links
-  - Regex patterns for slack.com/archives/... URLs
-- [ ] T056 [US4] Update pkg/parser/mrkdwn.go to call linkreplacer during conversion
-- [ ] T057 [US4] Implement link replacement logic:
-  - Channel link (slack.com/archives/C123) → conversation folder URL
-  - Message link (slack.com/archives/C123/p1234) → daily doc URL (with anchor if possible)
-  - Thread link (slack.com/archives/C123/p1234?thread_ts=...) → thread doc URL
-  - If target not exported: keep original link + "[not in export]" note
-- [ ] T058 [US4] Update export index lookups to support all link types
-- [ ] T059 [US4] Add second-pass link replacement for cross-conversation references:
-  - After all conversations exported, re-scan for links to newly exported content
-  - Update docs with resolved links (or mark as optional enhancement)
+- [x] T055 [US4] Slack link parsing and replacement (already existed in `mrkdwn.go`):
+  - `FindSlackLinks` + `ReplaceSlackLinks` parse slack.com/archives/ URLs
+  - `SlackLinkResolver` callback type for resolution
+- [x] T056 [US4] Integrated link replacement into `ConvertMrkdwnWithLinks`:
+  - `ReplaceSlackLinks` called before other mrkdwn conversions
+  - Resolver callback wired through `DocWriter` → `ExportIndex.LookupDocURL`
+- [x] T057 [US4] Link replacement logic:
+  - Message link → daily doc URL via `LookupDocURL` (timestamp → date → doc)
+  - Conversation link → folder URL via `LookupConversationURL`
+  - Thread link → thread folder via `LookupThreadURL`
+  - Unresolved links kept as-is
+- [x] T058 [US4] Export index lookups support all link types (already existed):
+  - `LookupDocURL`, `LookupThreadURL`, `LookupConversationURL`
+- [ ] T059 [US4] Second-pass link replacement for cross-conversation references (optional)
 
-**Checkpoint**: Slack links within exported content point to corresponding Google Docs
+**Checkpoint**: Slack archive URLs in exported content point to Google Docs ✅
 
 ---
 
