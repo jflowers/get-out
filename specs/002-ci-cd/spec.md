@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-ci-cd`  
 **Created**: 2026-02-07  
-**Status**: Draft  
+**Status**: Complete  
 **Input**: User request: "Setup CI/CD with GitHub. Release should auto-generate release notes from commit messages."
 
 ## User Scenarios & Testing
@@ -34,11 +34,11 @@ messages since the last tag.
 
 ## Success Criteria
 
-- [ ] SC-001: Push to any branch triggers build + test + vet
-- [ ] SC-002: PR shows CI check status
-- [ ] SC-003: Tag push creates GitHub Release with binaries
-- [ ] SC-004: Release notes auto-generated from commit messages
-- [ ] SC-005: Binaries built for macOS (amd64/arm64) + Linux (amd64/arm64)
+- [x] SC-001: Push to any branch triggers build + test + vet
+- [x] SC-002: PR shows CI check status
+- [x] SC-003: Tag push creates GitHub Release with binaries
+- [x] SC-004: Release notes auto-generated from commit messages
+- [x] SC-005: Binaries built for macOS (amd64/arm64) + Linux (amd64/arm64)
 
 ## Non-Goals
 

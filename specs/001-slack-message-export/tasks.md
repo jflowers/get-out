@@ -131,7 +131,7 @@ Project structure from plan.md:
 - [x] T023 [P] [US1] Create tests/unit/parser_test.go with mrkdwn to Docs conversion tests (mentions, links, formatting)
 - [x] T024 [P] [US1] Create tests/unit/resolver_test.go with user ID resolution tests
 - [x] T025 [P] [US1] Create tests/integration/slackapi_test.go with mock HTTP server for conversations.history
-- [ ] T026 [P] [US1] Create tests/unit/gdrive_test.go with Docs formatting request tests
+- [x] T026 [P] [US1] Create tests/unit/gdrive_test.go with Docs formatting request tests
 - [x] T027 [P] [US1] Create tests/unit/index_test.go with export index save/load tests
 
 ### Implementation for User Story 1
@@ -182,8 +182,8 @@ Project structure from plan.md:
 
 ### Tests for User Story 2
 
-- [ ] T036 [P] [US2] Add tests/unit/thread_test.go with thread detection, topic extraction, and daily grouping tests
-- [ ] T037 [P] [US2] Add tests/integration/replies_test.go with mock for conversations.replies
+- [x] T036 [P] [US2] Add tests/unit/thread_test.go with thread detection, topic extraction, and daily grouping tests
+- [x] T037 [P] [US2] Add tests/integration/replies_test.go with mock for conversations.replies
 
 ### Implementation for User Story 2
 
@@ -213,7 +213,7 @@ Project structure from plan.md:
 
 ### Tests for User Story 3
 
-- [ ] T045 [P] [US3] Create tests/unit/usermapping_test.go with mapping load and lookup tests
+- [x] T045 [P] [US3] Create tests/unit/usermapping_test.go with mapping load and lookup tests
 
 ### Implementation for User Story 3
 
@@ -228,7 +228,7 @@ Project structure from plan.md:
 - [x] T050 [US3] Handle bot users: [bot] indicator for IsBot/IsAppUser
 - [x] T051 [US3] Handle deleted users: [deactivated] indicator for Deleted flag
 - [x] T052 [US3] Batch user loading: LoadUsersForConversations fetches only relevant users
-- [ ] T053 [US3] Add `--user-mapping` flag to export command to specify mapping file path
+- [x] T053 [US3] Add `--user-mapping` flag to export command to specify mapping file path
 
 **Checkpoint**: @mentions resolve to Google mailto: links where people.json mapping exists ✅
 
@@ -242,7 +242,7 @@ Project structure from plan.md:
 
 ### Tests for User Story 4
 
-- [ ] T054 [P] [US4] Create tests/unit/linkreplacer_test.go with Slack URL parsing and replacement tests
+- [x] T054 [P] [US4] Create tests/unit/linkreplacer_test.go with Slack URL parsing and replacement tests
 
 ### Implementation for User Story 4
 
@@ -259,7 +259,7 @@ Project structure from plan.md:
   - Unresolved links kept as-is
 - [x] T058 [US4] Export index lookups support all link types (already existed):
   - `LookupDocURL`, `LookupThreadURL`, `LookupConversationURL`
-- [ ] T059 [US4] Second-pass link replacement for cross-conversation references (optional)
+- [x] T059 [US4] Second-pass link replacement for cross-conversation references
 
 **Checkpoint**: Slack archive URLs in exported content point to Google Docs ✅
 
@@ -273,8 +273,8 @@ Project structure from plan.md:
 
 ### Tests for User Story 5
 
-- [ ] T060 [P] [US5] Create tests/unit/checkpoint_test.go with checkpoint save/load tests
-- [ ] T061 [P] [US5] Create tests/unit/ratelimit_test.go with backoff calculation tests
+- [x] T060 [P] [US5] Create tests/unit/checkpoint_test.go with checkpoint save/load tests
+- [x] T061 [P] [US5] Create tests/unit/ratelimit_test.go with backoff calculation tests
 
 ### Implementation for User Story 5
 
@@ -303,11 +303,11 @@ Project structure from plan.md:
 - [x] T070 Create internal/cli/status.go with `status` command:
   - Show exported conversations from index
   - Display status, message count, doc count, thread count, last updated
-- [ ] T071 Add `--all-dms` flag to export command for batch DM export
-- [ ] T072 Add `--all-groups` flag to export command for batch group export
-- [ ] T073 Implement parallel conversation export with semaphore (max 3 concurrent)
-- [ ] T074 Add session expiry detection in chrome package (clear error message)
-- [ ] T075 Add Google token refresh check before each export
+- [x] T071 Add `--all-dms` flag to export command for batch DM export
+- [x] T072 Add `--all-groups` flag to export command for batch group export
+- [x] T073 Implement parallel conversation export with semaphore (max 5 concurrent)
+- [x] T074 Add session expiry detection in chrome package (clear error message)
+- [x] T075 Add Google token refresh check before each export
 - [x] T076 [P] Update README.md with features, commands, project structure, and usage examples
 - [x] T077 [P] Update quickstart.md with full workflow, threads, user mapping, and all current features
 - [x] T078 Add `--from` and `--to` date filters and `--sync` incremental export to export command
