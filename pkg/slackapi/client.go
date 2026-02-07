@@ -377,10 +377,12 @@ type ListConversationsOptions struct {
 
 // GetAllMessages retrieves all messages from a conversation, handling pagination.
 // It calls the callback for each batch of messages.
-func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest string, callback func([]Message) error) error {
+// oldest and latest are Slack timestamps that bound the query window.
+func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, latest string, callback func([]Message) error) error {
 	opts := &HistoryOptions{
 		Limit:  200,
 		Oldest: oldest,
+		Latest: latest,
 	}
 
 	for {

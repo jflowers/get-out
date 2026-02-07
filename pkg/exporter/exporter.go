@@ -37,7 +37,10 @@ type Exporter struct {
 	onProgress func(msg string)
 
 	// Options
-	debug bool
+	debug    bool
+	dateFrom string // Slack timestamp: only messages after this
+	dateTo   string // Slack timestamp: only messages before this
+	syncMode bool   // Use LastMessageTS from index as oldest
 }
 
 // ExporterConfig holds configuration for creating an Exporter.
@@ -52,6 +55,11 @@ type ExporterConfig struct {
 	// Optional paths from settings.json
 	GoogleCredentialsFile string // Custom path to credentials.json
 	SlackBotToken         string // Bot token for API mode
+
+	// Date range and sync options
+	DateFrom string // Slack timestamp: only export messages after this
+	DateTo   string // Slack timestamp: only export messages before this
+	SyncMode bool   // Only export messages since last successful export
 }
 
 // Progress is a helper to report progress.
@@ -72,6 +80,9 @@ func NewExporter(cfg *ExporterConfig) *Exporter {
 		slackBotToken:         cfg.SlackBotToken,
 		debug:                 cfg.Debug,
 		onProgress:            cfg.OnProgress,
+		dateFrom:              cfg.DateFrom,
+		dateTo:                cfg.DateTo,
+		syncMode:              cfg.SyncMode,
 		userResolver:          parser.NewUserResolver(),
 		channelResolver:       parser.NewChannelResolver(),
 	}
@@ -204,11 +215,29 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	}
 	result.FolderURL = convExport.FolderURL
 
-	// Get the oldest message timestamp for resuming (if any)
+	// Determine oldest/latest bounds
 	oldest := ""
-	if convExport.LastMessageTS != "" {
-		oldest = convExport.LastMessageTS
-		e.Progress("Resuming from timestamp: %s", oldest)
+	latest := ""
+
+	if e.syncMode {
+		// Sync mode: pick up from where we left off
+		if convExport.LastMessageTS != "" {
+			oldest = convExport.LastMessageTS
+			e.Progress("Syncing from last export timestamp: %s", oldest)
+		} else {
+			e.Progress("No previous export found, fetching all messages")
+		}
+	} else {
+		// Date range mode or full export
+		if e.dateFrom != "" {
+			oldest = e.dateFrom
+		}
+		if e.dateTo != "" {
+			latest = e.dateTo
+		}
+		if oldest != "" || latest != "" {
+			e.Progress("Date range: %s to %s", orDefault(oldest, "beginning"), orDefault(latest, "now"))
+		}
 	}
 
 	// Fetch all messages
@@ -216,7 +245,7 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	var allMessages []slackapi.Message
 	messageCount := 0
 
-	err = e.slackClient.GetAllMessages(ctx, conv.ID, oldest, func(batch []slackapi.Message) error {
+	err = e.slackClient.GetAllMessages(ctx, conv.ID, oldest, latest, func(batch []slackapi.Message) error {
 		allMessages = append(allMessages, batch...)
 		messageCount += len(batch)
 		e.Progress("Fetched %d messages...", messageCount)
@@ -414,4 +443,12 @@ func (r *ExportResult) String() string {
 	}
 	return fmt.Sprintf("%s: %d messages, %d docs, %d threads (%v) - %s",
 		r.Name, r.MessageCount, r.DocsCreated, r.ThreadsExported, r.Duration, status)
+}
+
+// orDefault returns s if non-empty, otherwise the fallback.
+func orDefault(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }

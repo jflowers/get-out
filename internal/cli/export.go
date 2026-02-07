@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/exporter"
@@ -19,6 +21,9 @@ var (
 	exportFolderID string
 	exportDryRun   bool
 	exportResume   bool
+	exportFrom     string
+	exportTo       string
+	exportSync     bool
 )
 
 var exportCmd = &cobra.Command{
@@ -51,7 +56,13 @@ Examples:
   get-out export --chrome-port 9223
 
   # Export to an existing Google Drive folder by ID
-  get-out export --folder-id 1ABC123xyz`,
+  get-out export --folder-id 1ABC123xyz
+
+  # Export only messages from a date range
+  get-out export --from 2025-01-01 --to 2025-06-30
+
+  # Incremental sync - only new messages since last export
+  get-out export --sync`,
 	RunE: runExport,
 }
 
@@ -60,6 +71,9 @@ func init() {
 	exportCmd.Flags().StringVar(&exportFolderID, "folder-id", "", "Google Drive folder ID to export into (uses existing folder)")
 	exportCmd.Flags().BoolVar(&exportDryRun, "dry-run", false, "Show what would be exported without actually exporting")
 	exportCmd.Flags().BoolVar(&exportResume, "resume", false, "Resume from last checkpoint")
+	exportCmd.Flags().StringVar(&exportFrom, "from", "", "Export messages from this date (YYYY-MM-DD)")
+	exportCmd.Flags().StringVar(&exportTo, "to", "", "Export messages up to this date (YYYY-MM-DD)")
+	exportCmd.Flags().BoolVar(&exportSync, "sync", false, "Only export messages since last successful export")
 	rootCmd.AddCommand(exportCmd)
 }
 
@@ -183,6 +197,27 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Create exporter
+	// Validate flag combinations
+	if exportSync && (exportFrom != "" || exportTo != "") {
+		return fmt.Errorf("--sync cannot be combined with --from or --to")
+	}
+
+	// Parse date range flags into Slack timestamps
+	dateFrom, err := parseDateFlag(exportFrom)
+	if err != nil {
+		return fmt.Errorf("invalid --from date: %w", err)
+	}
+	dateTo, err := parseDateFlag(exportTo)
+	if err != nil {
+		return fmt.Errorf("invalid --to date: %w", err)
+	}
+	// --to should be end of day (23:59:59)
+	if dateTo != "" {
+		ts, _ := strconv.ParseInt(dateTo[:len(dateTo)-7], 10, 64) // strip .000000
+		ts += 86400 - 1 // end of day
+		dateTo = fmt.Sprintf("%d.000000", ts)
+	}
+
 	exp := exporter.NewExporter(&exporter.ExporterConfig{
 		ConfigDir:             configDir,
 		RootFolderName:        exportFolder,
@@ -191,6 +226,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		Debug:                 debugMode,
 		GoogleCredentialsFile: settings.GoogleCredentialsFile,
 		SlackBotToken:         settings.SlackBotToken,
+		DateFrom:              dateFrom,
+		DateTo:                dateTo,
+		SyncMode:              exportSync,
 		OnProgress: func(msg string) {
 			if verbose || debugMode {
 				fmt.Printf("  %s\n", msg)
@@ -279,4 +317,17 @@ func truncateName(name string, maxLen int) string {
 		return name[:maxLen]
 	}
 	return name[:maxLen-3] + "..."
+}
+
+// parseDateFlag converts a YYYY-MM-DD date string to a Slack timestamp.
+// Returns empty string if input is empty.
+func parseDateFlag(dateStr string) (string, error) {
+	if dateStr == "" {
+		return "", nil
+	}
+	t, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return "", fmt.Errorf("expected YYYY-MM-DD format, got %q", dateStr)
+	}
+	return fmt.Sprintf("%d.000000", t.Unix()), nil
 }
