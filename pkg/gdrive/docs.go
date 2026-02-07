@@ -2,11 +2,15 @@ package gdrive
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"time"
 	"unicode/utf16"
 
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 )
 
 // DocInfo contains information about a Google Doc.
@@ -112,10 +116,12 @@ func (c *Client) AppendText(ctx context.Context, docID string, text string) erro
 		},
 	}
 
-	_, err = c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
-		Requests: requests,
-	}).Context(ctx).Do()
-	if err != nil {
+	if err := retryOnRateLimit(ctx, "append text", func() error {
+		_, err := c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
+			Requests: requests,
+		}).Context(ctx).Do()
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to append text: %w", err)
 	}
 
@@ -179,10 +185,12 @@ func (c *Client) InsertFormattedContent(ctx context.Context, docID string, conte
 		return nil
 	}
 
-	_, err := c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
-		Requests: requests,
-	}).Context(ctx).Do()
-	if err != nil {
+	if err := retryOnRateLimit(ctx, "insert formatted content", func() error {
+		_, err := c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
+			Requests: requests,
+		}).Context(ctx).Do()
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to insert formatted content: %w", err)
 	}
 
@@ -312,10 +320,12 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 	}
 
 	// Execute batch update
-	_, err = c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
-		Requests: requests,
-	}).Context(ctx).Do()
-	if err != nil {
+	if err := retryOnRateLimit(ctx, "append messages", func() error {
+		_, err := c.Docs.Documents.BatchUpdate(docID, &docs.BatchUpdateDocumentRequest{
+			Requests: requests,
+		}).Context(ctx).Do()
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to append messages: %w", err)
 	}
 
@@ -333,4 +343,40 @@ type MessageBlock struct {
 // Google Docs API uses UTF-16 code units for indexing, not bytes.
 func utf16Len(s string) int64 {
 	return int64(len(utf16.Encode([]rune(s))))
+}
+
+const (
+	maxRetries     = 3
+	retryWaitSecs   = 60 // Google Docs quota resets per minute
+)
+
+// retryOnRateLimit retries a Google API call on 429 rate limit errors.
+// It waits retryWaitSecs between attempts to let the per-minute quota reset.
+func retryOnRateLimit(ctx context.Context, operation string, fn func() error) error {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		// Check if it's a rate limit error
+		var apiErr *googleapi.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != 429 {
+			return err // Not a rate limit error, return immediately
+		}
+
+		if attempt == maxRetries {
+			return err // Exhausted retries
+		}
+
+		fmt.Fprintf(os.Stderr, "Rate limited on %s, waiting %ds (attempt %d/%d)\n",
+			operation, retryWaitSecs, attempt+1, maxRetries)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(retryWaitSecs) * time.Second):
+		}
+	}
+	return nil
 }
