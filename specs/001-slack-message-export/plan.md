@@ -268,7 +268,7 @@ require (
 - [x] SC-001: Export 1000-message conversation in <5 minutes (1,094 msgs in ~6 min — close, rate limit dominated)
 - [x] SC-002: No raw user IDs or mrkdwn syntax in Google Docs output
 - [x] SC-003: 100% message capture (verified by count)
-- [ ] SC-004: Resume within 10 seconds, lose <1 minute progress
+- [x] SC-004: Resume within 10 seconds, lose <1 minute progress
 - [x] SC-005: No manual Slack token configuration required
 - [x] SC-006: Google Docs searchable via Drive search
 - [x] SC-007: Google Docs shareable via standard Drive sharing

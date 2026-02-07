@@ -282,12 +282,11 @@ Project structure from plan.md:
 - [x] T062 [US5] Update pkg/slackapi/client.go with rate limit detection (429 status, ratelimited error)
 - [x] T063 [US5] Implement exponential backoff in Slack client: initial 1s, max 60s, respect Retry-After header
 - [x] T064 [US5] Update pkg/gdrive/docs.go with rate limit handling for Google APIs (429)
-- [ ] T065 [US5] Create pkg/exporter/checkpoint.go with SaveCheckpoint and LoadCheckpoint:
-  - State: conversation_id, last_ts, messages_exported, current_date, folder_id, status
-  - Save after each daily doc is created
-  - File: `.checkpoint.json` in config directory
-- [ ] T066 [US5] Update pkg/exporter/exporter.go to check for existing checkpoint on start
-- [ ] T067 [US5] Add `--resume` flag to export command that loads checkpoint and continues
+- [x] T065 [US5] Create checkpoint system in pkg/exporter:
+  - Status field tracks in_progress/complete per conversation
+  - Index saved after each daily doc for granular checkpointing
+- [x] T066 [US5] Update pkg/exporter/exporter.go to check for existing checkpoint on start
+- [x] T067 [US5] Add `--resume` flag to export command that skips completed conversations
 - [x] T068 [US5] Add progress reporting: show message count, docs created, rate limit waits, ETA
 
 **Checkpoint**: Large exports survive rate limits and interruptions; can resume seamlessly
