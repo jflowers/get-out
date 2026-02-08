@@ -157,22 +157,22 @@ func (c *ConversationsConfig) FilterByExport() []ConversationConfig {
 	return result
 }
 
-// FilterByMode returns conversations matching the given export mode.
-func (c *ConversationsConfig) FilterByMode(mode models.ExportMode) []ConversationConfig {
+// FilterByType returns only conversations of the specified type.
+func (c *ConversationsConfig) FilterByType(convType models.ConversationType) []ConversationConfig {
 	var result []ConversationConfig
 	for _, conv := range c.Conversations {
-		if conv.Mode == mode {
+		if conv.Type == convType {
 			result = append(result, conv)
 		}
 	}
 	return result
 }
 
-// FilterByType returns conversations matching the given type.
-func (c *ConversationsConfig) FilterByType(t models.ConversationType) []ConversationConfig {
+// FilterByMode returns conversations matching the given export mode.
+func (c *ConversationsConfig) FilterByMode(mode models.ExportMode) []ConversationConfig {
 	var result []ConversationConfig
 	for _, conv := range c.Conversations {
-		if conv.Type == t {
+		if conv.Mode == mode {
 			result = append(result, conv)
 		}
 	}

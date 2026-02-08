@@ -200,3 +200,49 @@ func IsTokenValid(cfg *Config) bool {
 	}
 	return token.Valid()
 }
+
+// EnsureTokenFresh checks if the saved Google OAuth token is still valid.
+// If expired but a refresh token exists, it proactively refreshes and saves the token.
+// Returns nil if the token is ready to use, or an error if re-authentication is needed.
+func EnsureTokenFresh(ctx context.Context, cfg *Config) error {
+	token, err := loadToken(cfg.TokenPath)
+	if err != nil {
+		return fmt.Errorf("no saved Google token found, run 'get-out auth' first: %w", err)
+	}
+
+	// Token is still valid
+	if token.Valid() {
+		return nil
+	}
+
+	// Token expired but has refresh token — try to refresh
+	if token.RefreshToken == "" {
+		return fmt.Errorf("Google token expired and no refresh token available, run 'get-out auth' to re-authenticate")
+	}
+
+	// Read credentials to build oauth config
+	credBytes, err := os.ReadFile(cfg.CredentialsPath)
+	if err != nil {
+		return fmt.Errorf("unable to read credentials for token refresh: %w", err)
+	}
+
+	oauthConfig, err := google.ConfigFromJSON(credBytes, Scopes...)
+	if err != nil {
+		return fmt.Errorf("unable to parse credentials: %w", err)
+	}
+
+	// Use TokenSource to auto-refresh
+	tokenSource := oauthConfig.TokenSource(ctx, token)
+	newToken, err := tokenSource.Token()
+	if err != nil {
+		return fmt.Errorf("Google token refresh failed, run 'get-out auth' to re-authenticate: %w", err)
+	}
+
+	// Save the refreshed token
+	if err := saveToken(cfg.TokenPath, newToken); err != nil {
+		// Non-fatal: token was refreshed but we couldn't save it
+		fmt.Fprintf(os.Stderr, "Warning: could not save refreshed token: %v\n", err)
+	}
+
+	return nil
+}

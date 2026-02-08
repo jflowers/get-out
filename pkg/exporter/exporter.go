@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jflowers/get-out/pkg/chrome"
@@ -426,6 +427,11 @@ func (e *Exporter) exportThread(ctx context.Context, convID string, parent slack
 
 // ExportAll exports all conversations in the provided list.
 func (e *Exporter) ExportAll(ctx context.Context, conversations []config.ConversationConfig) ([]*ExportResult, error) {
+	// Pre-validate connections before starting the long export
+	if err := e.ValidateConnections(ctx); err != nil {
+		return nil, fmt.Errorf("pre-export validation failed: %w", err)
+	}
+
 	// Collect channel IDs and load only users from those conversations
 	channelIDs := make([]string, len(conversations))
 	for i, conv := range conversations {
@@ -463,7 +469,213 @@ func (e *Exporter) ExportAll(ctx context.Context, conversations []config.Convers
 		}
 	}
 
+	// Second pass: resolve cross-conversation Slack links now that all docs exist
+	if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
+		e.Progress("Warning: cross-link resolution had errors: %v", err)
+	} else if replaced > 0 {
+		e.Progress("Resolved %d cross-conversation links", replaced)
+	}
+
 	return results, nil
+}
+
+// ExportAllParallel exports conversations concurrently with a max parallelism limit.
+// maxConcurrent controls how many conversations are exported at the same time (1-5).
+func (e *Exporter) ExportAllParallel(ctx context.Context, conversations []config.ConversationConfig, maxConcurrent int) ([]*ExportResult, error) {
+	// Clamp parallelism
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
+	}
+	if maxConcurrent > 5 {
+		maxConcurrent = 5
+	}
+
+	// If parallelism is 1, use the simpler sequential path
+	if maxConcurrent == 1 {
+		return e.ExportAll(ctx, conversations)
+	}
+
+	// Pre-validate connections
+	if err := e.ValidateConnections(ctx); err != nil {
+		return nil, fmt.Errorf("pre-export validation failed: %w", err)
+	}
+
+	// Load users for all conversations first (sequential)
+	channelIDs := make([]string, len(conversations))
+	for i, conv := range conversations {
+		channelIDs[i] = conv.ID
+	}
+	if err := e.LoadUsersForConversations(ctx, channelIDs); err != nil {
+		return nil, err
+	}
+
+	// Semaphore channel to limit concurrency
+	sem := make(chan struct{}, maxConcurrent)
+
+	// Results with mutex for safe concurrent access
+	var mu sync.Mutex
+	results := make([]*ExportResult, len(conversations))
+
+	var wg sync.WaitGroup
+
+	for i, conv := range conversations {
+		// Check if context cancelled
+		select {
+		case <-ctx.Done():
+			break
+		default:
+		}
+
+		// In resume mode, skip completed conversations
+		if e.resumeMode {
+			if existing := e.index.GetConversation(conv.ID); existing != nil && existing.Status == "complete" {
+				e.Progress("Skipping completed conversation %d/%d: %s", i+1, len(conversations), conv.Name)
+				results[i] = &ExportResult{
+					ConversationID: conv.ID,
+					Name:           conv.Name,
+					FolderURL:      existing.FolderURL,
+					Skipped:        true,
+				}
+				continue
+			}
+		}
+
+		wg.Add(1)
+		go func(idx int, c config.ConversationConfig) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			e.Progress("[parallel %d/%d] Exporting: %s", idx+1, len(conversations), c.Name)
+
+			result, err := e.ExportConversation(ctx, c)
+			if err != nil {
+				result.Error = err
+				e.Progress("[parallel %d/%d] Error: %s: %v", idx+1, len(conversations), c.Name, err)
+			}
+
+			mu.Lock()
+			results[idx] = result
+			mu.Unlock()
+		}(i, conv)
+	}
+
+	wg.Wait()
+
+	// Second pass: resolve cross-conversation links
+	if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
+		e.Progress("Warning: cross-link resolution had errors: %v", err)
+	} else if replaced > 0 {
+		e.Progress("Resolved %d cross-conversation links", replaced)
+	}
+
+	// Filter nil results (shouldn't happen, but be safe)
+	var finalResults []*ExportResult
+	for _, r := range results {
+		if r != nil {
+			finalResults = append(finalResults, r)
+		}
+	}
+
+	return finalResults, nil
+}
+
+// ResolveCrossLinks scans all exported docs for remaining Slack message links
+// and replaces them with Google Docs URLs using the now-complete index.
+// This handles forward references where conversation B was referenced in conversation A
+// before conversation B was exported.
+func (e *Exporter) ResolveCrossLinks(ctx context.Context) (int, error) {
+	if e.index == nil || e.gdriveClient == nil {
+		return 0, nil
+	}
+
+	totalReplaced := 0
+
+	for _, conv := range e.index.Conversations {
+		for _, doc := range conv.DailyDocs {
+			if doc.DocID == "" {
+				continue
+			}
+
+			replaced, err := e.resolveLinksInDoc(ctx, doc.DocID)
+			if err != nil {
+				if e.debug {
+					e.Progress("Warning: could not resolve links in doc %s: %v", doc.DocID, err)
+				}
+				continue
+			}
+			totalReplaced += replaced
+		}
+
+		// Also check thread docs
+		for _, thread := range conv.Threads {
+			for _, doc := range thread.DailyDocs {
+				if doc.DocID == "" {
+					continue
+				}
+
+				replaced, err := e.resolveLinksInDoc(ctx, doc.DocID)
+				if err != nil {
+					if e.debug {
+						e.Progress("Warning: could not resolve links in thread doc %s: %v", doc.DocID, err)
+					}
+					continue
+				}
+				totalReplaced += replaced
+			}
+		}
+	}
+
+	return totalReplaced, nil
+}
+
+// resolveLinksInDoc reads a doc, finds Slack links, and replaces them with Google Docs URLs.
+func (e *Exporter) resolveLinksInDoc(ctx context.Context, docID string) (int, error) {
+	content, err := e.gdriveClient.GetDocumentContent(ctx, docID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Find Slack links in the content
+	links := parser.FindSlackLinks(content)
+	if len(links) == 0 {
+		return 0, nil
+	}
+
+	// Build replacement map for links that can now be resolved
+	replacements := make(map[string]string)
+	for _, link := range links {
+		docsURL := e.index.LookupDocURL(link.ChannelID, link.MessageTS)
+		if docsURL != "" && docsURL != link.FullURL {
+			replacements[link.FullURL] = docsURL
+		}
+	}
+
+	if len(replacements) == 0 {
+		return 0, nil
+	}
+
+	return e.gdriveClient.ReplaceText(ctx, docID, replacements)
+}
+
+// ValidateConnections checks that both Slack and Google connections are alive
+// before starting a potentially long export. Returns clear error messages
+// if the session has expired or the token needs refreshing.
+func (e *Exporter) ValidateConnections(ctx context.Context) error {
+	if e.slackClient == nil {
+		return fmt.Errorf("Slack client not initialized")
+	}
+
+	e.Progress("Validating Slack session...")
+	authResp, err := e.slackClient.ValidateAuth(ctx)
+	if err != nil {
+		return fmt.Errorf("Slack session expired or invalid: %w\n\nPlease refresh your Slack session in the browser and try again", err)
+	}
+	e.Progress("Slack session valid: %s @ %s", authResp.User, authResp.Team)
+
+	return nil
 }
 
 // GetRootFolderURL returns the URL of the root export folder.
