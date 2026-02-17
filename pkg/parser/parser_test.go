@@ -3,6 +3,7 @@ package parser
 import (
 	"testing"
 
+	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/slackapi"
 )
 
@@ -58,6 +59,51 @@ func TestConvertMrkdwn_UserMentions(t *testing.T) {
 	}
 }
 
+func TestConvertMrkdwn_UserMentions_PersonResolver(t *testing.T) {
+	// PersonResolver from people.json — no UserResolver at all
+	personResolver := NewPersonResolver(&config.PeopleConfig{
+		People: []config.PersonConfig{
+			{SlackID: "U123ABC", DisplayName: "Alice"},
+			{SlackID: "U456DEF", DisplayName: "Bob", GoogleEmail: "bob@example.com"},
+		},
+	})
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "resolved from people.json when no UserResolver",
+			input: "Hello <@U123ABC>!",
+			want:  "Hello @Alice!",
+		},
+		{
+			name:  "unknown user falls back to raw ID",
+			input: "Hello <@U999ZZZ>!",
+			want:  "Hello @U999ZZZ!",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := ConvertMrkdwnWithLinks(tt.input, nil, nil, personResolver, nil)
+			if got != tt.want {
+				t.Errorf("ConvertMrkdwnWithLinks() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// Verify email link is also generated
+	got, links := ConvertMrkdwnWithLinks("Hi <@U456DEF>", nil, nil, personResolver, nil)
+	if got != "Hi @Bob" {
+		t.Errorf("got %q, want %q", got, "Hi @Bob")
+	}
+	if len(links) != 1 || links[0].URL != "mailto:bob@example.com" {
+		t.Errorf("expected mailto link for Bob, got %v", links)
+	}
+}
+
 func TestConvertMrkdwn_ChannelMentions(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -106,7 +152,7 @@ func TestConvertMrkdwn_URLs(t *testing.T) {
 		{
 			name:  "URL with text",
 			input: "Check <https://example.com|Example Site>",
-			want:  "Check Example Site (https://example.com)",
+			want:  "Check Example Site",
 		},
 		{
 			name:  "URL without text",

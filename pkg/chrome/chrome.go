@@ -18,7 +18,6 @@ type Session struct {
 	allocCtx    context.Context
 	allocCancel context.CancelFunc
 	ctx         context.Context
-	cancel      context.CancelFunc
 	debugPort   int
 
 	// Extracted credentials
@@ -59,13 +58,19 @@ func Connect(ctx context.Context, cfg *Config) (*Session, error) {
 
 	debugURL := fmt.Sprintf("ws://127.0.0.1:%d", cfg.DebugPort)
 
-	// Create remote allocator to connect to existing browser
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(ctx, debugURL)
+	// IMPORTANT: Use context.Background() for the allocator, NOT the caller's ctx.
+	// If we used the caller's ctx (which is cancelled on Ctrl+C), the cancellation
+	// would cascade through chromedp and send Target.closeTarget CDP commands,
+	// closing the user's browser tabs (including the Slack tab).
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), debugURL)
 
-	// Create browser context with timeout
-	browserCtx, cancel := chromedp.NewContext(allocCtx)
+	// Create browser context — this opens a new blank tab for our use.
+	// We intentionally discard the cancel func: calling it would send
+	// Target.closeTarget and close the blank tab or attached target.
+	browserCtx, _ := chromedp.NewContext(allocCtx)
 
-	// Test connection by running a simple action
+	// Test connection using the caller's timeout, but don't attach
+	// the caller's ctx to the chromedp tree.
 	testCtx, testCancel := context.WithTimeout(browserCtx, cfg.Timeout)
 	defer testCancel()
 
@@ -75,7 +80,6 @@ func Connect(ctx context.Context, cfg *Config) (*Session, error) {
 	)
 	if err != nil {
 		allocCancel()
-		cancel()
 		return nil, fmt.Errorf("failed to connect to browser at %s: %w", debugURL, err)
 	}
 
@@ -83,22 +87,19 @@ func Connect(ctx context.Context, cfg *Config) (*Session, error) {
 		allocCtx:    allocCtx,
 		allocCancel: allocCancel,
 		ctx:         browserCtx,
-		cancel:      cancel,
 		debugPort:   cfg.DebugPort,
 	}, nil
 }
 
-// Close releases all resources associated with the session.
-// It only closes the blank tab we created during Connect;
-// it does NOT close any pre-existing browser tabs (like the Slack tab).
+// Close releases resources associated with the session.
+// It intentionally does NOT close any browser tabs.
+// The allocator and browser contexts are decoupled from the caller's
+// context specifically to prevent Ctrl+C from closing tabs.
 func (s *Session) Close() {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	// Intentionally do NOT call allocCancel() here.
-	// Canceling the allocator cascades to all child contexts,
-	// which would close any attached tabs (including the Slack tab).
-	// For a CLI process, the allocator resources are cleaned up on exit.
+	// No-op: we intentionally don't cancel any chromedp contexts.
+	// Canceling the allocator or browser contexts would send CDP
+	// Target.closeTarget commands and close browser tabs.
+	// For a CLI process, resources are cleaned up on exit.
 }
 
 // Context returns the chromedp context for running actions.

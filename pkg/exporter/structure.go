@@ -303,7 +303,14 @@ func sanitizeFolderName(name string) string {
 }
 
 // truncate shortens a string to maxLen, adding "..." if truncated.
+// It also sanitizes the string by replacing newlines and tabs with spaces.
 func truncate(s string, maxLen int) string {
+	// Sanitize first: replace newlines, tabs, and carriage returns with spaces
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	s = strings.TrimSpace(s)
+
 	if len(s) <= maxLen {
 		return s
 	}

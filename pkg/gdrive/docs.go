@@ -343,6 +343,42 @@ func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages
 				}
 			}
 		}
+
+		// Insert images if present
+		if len(msg.Images) > 0 {
+			for _, img := range msg.Images {
+				// Insert a newline before the image if there's content
+				requests = append(requests, &docs.Request{
+					InsertText: &docs.InsertTextRequest{
+						Location: &docs.Location{Index: currentIndex},
+						Text:     "\n",
+					},
+				})
+				currentIndex++
+
+				// Insert the image
+				imgIdx := currentIndex
+				requests = append(requests, &docs.Request{
+					InsertInlineImage: &docs.InsertInlineImageRequest{
+						Location: &docs.Location{Index: imgIdx},
+						Uri:      img.URL,
+					},
+				})
+				// We don't increment currentIndex here because InsertInlineImage
+				// adds a character at the location, but we can't easily know its UTF16 length
+				// until it's inserted. However, for a batch update, it's usually 1.
+				currentIndex++
+
+				// Add another newline after the image
+				requests = append(requests, &docs.Request{
+					InsertText: &docs.InsertTextRequest{
+						Location: &docs.Location{Index: currentIndex},
+						Text:     "\n",
+					},
+				})
+				currentIndex++
+			}
+		}
 	}
 
 	// Execute batch update
@@ -364,12 +400,20 @@ type LinkAnnotation struct {
 	URL  string // The hyperlink URL
 }
 
+// ImageAnnotation represents an image to be embedded.
+type ImageAnnotation struct {
+	URL    string // Publicly accessible URL (from Drive)
+	Width  float64
+	Height float64
+}
+
 // MessageBlock represents a formatted message to insert into a doc.
 type MessageBlock struct {
 	SenderName string
 	Timestamp  string
 	Content    string
-	Links      []LinkAnnotation // Optional hyperlinks within Content
+	Links      []LinkAnnotation  // Optional hyperlinks within Content
+	Images     []ImageAnnotation // Optional images to embed after the message
 }
 
 // ReplaceText performs a batch find-and-replace in a Google Doc.

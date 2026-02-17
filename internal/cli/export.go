@@ -73,8 +73,8 @@ Examples:
   get-out export --all-dms
   get-out export --all-groups
 
-  # Export in parallel (max 3 concurrent)
-  get-out export --parallel 3`,
+  # Export in parallel (max 5 concurrent)
+  get-out export --parallel 5`,
 	RunE: runExport,
 }
 

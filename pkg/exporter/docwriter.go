@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jflowers/get-out/pkg/gdrive"
@@ -14,25 +15,31 @@ import (
 // DocWriter handles writing messages to Google Docs.
 type DocWriter struct {
 	client          *gdrive.Client
+	slackClient     *slackapi.Client
 	userResolver    *parser.UserResolver
 	channelResolver *parser.ChannelResolver
 	personResolver  *parser.PersonResolver
 	linkResolver    parser.SlackLinkResolver
+	threadResolver  parser.SlackLinkResolver
 }
 
 // NewDocWriter creates a new doc writer.
-func NewDocWriter(client *gdrive.Client, userResolver *parser.UserResolver, channelResolver *parser.ChannelResolver, personResolver *parser.PersonResolver, linkResolver parser.SlackLinkResolver) *DocWriter {
+func NewDocWriter(client *gdrive.Client, slackClient *slackapi.Client, userResolver *parser.UserResolver, channelResolver *parser.ChannelResolver, personResolver *parser.PersonResolver, linkResolver parser.SlackLinkResolver, threadResolver parser.SlackLinkResolver) *DocWriter {
 	return &DocWriter{
 		client:          client,
+		slackClient:     slackClient,
 		userResolver:    userResolver,
 		channelResolver: channelResolver,
 		personResolver:  personResolver,
 		linkResolver:    linkResolver,
+		threadResolver:  threadResolver,
 	}
 }
 
 // WriteMessages writes messages to a Google Doc.
-func (w *DocWriter) WriteMessages(ctx context.Context, docID string, messages []slackapi.Message) error {
+// convID is the Slack conversation ID (for thread link resolution).
+// folderID is the ID of the conversation folder (used for temp image uploads).
+func (w *DocWriter) WriteMessages(ctx context.Context, docID string, convID string, folderID string, messages []slackapi.Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -47,8 +54,8 @@ func (w *DocWriter) WriteMessages(ctx context.Context, docID string, messages []
 	// Convert to message blocks
 	var blocks []gdrive.MessageBlock
 	for _, msg := range sorted {
-		block := w.messageToBlock(msg)
-		if block.Content != "" || block.SenderName != "" {
+		block := w.messageToBlock(ctx, convID, folderID, msg)
+		if block.Content != "" || block.SenderName != "" || len(block.Images) > 0 {
 			blocks = append(blocks, block)
 		}
 	}
@@ -61,7 +68,7 @@ func (w *DocWriter) WriteMessages(ctx context.Context, docID string, messages []
 }
 
 // messageToBlock converts a Slack message to a doc message block.
-func (w *DocWriter) messageToBlock(msg slackapi.Message) gdrive.MessageBlock {
+func (w *DocWriter) messageToBlock(ctx context.Context, convID string, folderID string, msg slackapi.Message) gdrive.MessageBlock {
 	// Get sender name
 	senderName := w.getSenderName(msg)
 
@@ -75,6 +82,19 @@ func (w *DocWriter) messageToBlock(msg slackapi.Message) gdrive.MessageBlock {
 	var docLinks []gdrive.LinkAnnotation
 	for _, l := range links {
 		docLinks = append(docLinks, gdrive.LinkAnnotation{Text: l.Text, URL: l.URL})
+	}
+
+	// Add thread link if it's a parent
+	if msg.ReplyCount > 0 && w.threadResolver != nil {
+		threadURL := w.threadResolver(convID, msg.TS)
+		if threadURL != "" {
+			if content != "" {
+				content += "\n"
+			}
+			linkText := "→ View Thread"
+			content += linkText
+			docLinks = append(docLinks, gdrive.LinkAnnotation{Text: linkText, URL: threadURL})
+		}
 	}
 
 	// Add attachment info if present
@@ -95,13 +115,35 @@ func (w *DocWriter) messageToBlock(msg slackapi.Message) gdrive.MessageBlock {
 		}
 	}
 
-	// Add file info if present
+	// Process files (handle images)
+	var docImages []gdrive.ImageAnnotation
 	if len(msg.Files) > 0 {
 		for _, file := range msg.Files {
-			if content != "" {
-				content += "\n"
+			// If it's an image, try to embed it
+			if strings.HasPrefix(file.Mimetype, "image/") && w.slackClient != nil && w.client != nil {
+				// Download from Slack
+				data, err := w.slackClient.DownloadFile(ctx, file.URLPrivateDownload)
+				if err == nil {
+					// Upload to Drive temporarily
+					fileID, err := w.client.UploadFile(ctx, file.Name, file.Mimetype, data, folderID)
+					if err == nil {
+						// Make public for Docs API
+						if err := w.client.MakePublic(ctx, fileID); err == nil {
+							// Get web content link
+							url, err := w.client.GetWebContentLink(ctx, fileID)
+							if err == nil {
+								docImages = append(docImages, gdrive.ImageAnnotation{URL: url})
+							}
+						}
+					}
+				}
+			} else {
+				// Non-image file: just add a text reference
+				if content != "" {
+					content += "\n"
+				}
+				content += fmt.Sprintf("[File: %s]", file.Name)
 			}
-			content += fmt.Sprintf("[File: %s]", file.Name)
 		}
 	}
 
@@ -124,10 +166,12 @@ func (w *DocWriter) messageToBlock(msg slackapi.Message) gdrive.MessageBlock {
 		Timestamp:  timestamp,
 		Content:    content,
 		Links:      docLinks,
+		Images:     docImages,
 	}
 }
 
 // getSenderName returns the display name for a message sender.
+// Resolution order: people.json (PersonResolver) → Slack API cache (UserResolver) → raw ID.
 // Appends [bot] for bot users and [deactivated] for deleted users.
 func (w *DocWriter) getSenderName(msg slackapi.Message) string {
 	// Check for bot messages with username
@@ -137,9 +181,28 @@ func (w *DocWriter) getSenderName(msg slackapi.Message) string {
 
 	// Resolve user ID
 	if msg.User != "" {
+		name := ""
+
+		// Try people.json first (primary source)
+		if w.personResolver != nil {
+			name = w.personResolver.ResolveName(msg.User)
+		}
+
+		// Fall back to Slack API cache
+		if name == "" && w.userResolver != nil {
+			resolved := w.userResolver.Resolve(msg.User)
+			if resolved != msg.User {
+				name = resolved
+			}
+		}
+
+		// If still unresolved, use raw ID
+		if name == "" {
+			name = msg.User
+		}
+
+		// Check for bot/deleted indicators
 		if w.userResolver != nil {
-			name := w.userResolver.Resolve(msg.User)
-			// Check for bot/deleted indicators
 			if user := w.userResolver.GetUser(msg.User); user != nil {
 				if user.IsBot || user.IsAppUser {
 					name += " [bot]"
@@ -147,9 +210,8 @@ func (w *DocWriter) getSenderName(msg slackapi.Message) string {
 					name += " [deactivated]"
 				}
 			}
-			return name
 		}
-		return msg.User
+		return name
 	}
 
 	// Check for bot ID

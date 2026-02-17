@@ -146,7 +146,7 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 	e.loadPersonResolver()
 
 	// Create doc writer
-	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL)
+	e.docWriter = NewDocWriter(e.gdriveClient, e.slackClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL, e.index.LookupThreadURL)
 
 	return nil
 }
@@ -185,7 +185,7 @@ func (e *Exporter) InitializeWithSlackClient(ctx context.Context, slackClient *s
 	e.loadPersonResolver()
 
 	// Create doc writer
-	e.docWriter = NewDocWriter(e.gdriveClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL)
+	e.docWriter = NewDocWriter(e.gdriveClient, e.slackClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL, e.index.LookupThreadURL)
 
 	return nil
 }
@@ -299,6 +299,18 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	messagesByDate := GroupMessagesByDate(mainMessages)
 	dates := SortedDates(messagesByDate)
 
+	// Export threads first so we have links for the daily docs
+	threadParents := GetThreadParents(allMessages)
+	if len(threadParents) > 0 {
+		e.Progress("Exporting %d threads...", len(threadParents))
+		for _, parent := range threadParents {
+			if err := e.exportThread(ctx, conv.ID, parent); err != nil {
+				e.Progress("Warning: failed to export thread %s: %v", parent.TS, err)
+			}
+			result.ThreadsExported++
+		}
+	}
+
 	e.Progress("Writing to %d daily docs...", len(dates))
 
 	// Write each day's messages to a doc
@@ -312,7 +324,7 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 		}
 
 		// Write messages to doc
-		if err := e.docWriter.WriteMessages(ctx, docExport.DocID, msgs); err != nil {
+		if err := e.docWriter.WriteMessages(ctx, docExport.DocID, conv.ID, convExport.FolderID, msgs); err != nil {
 			return result, fmt.Errorf("failed to write messages for %s: %w", date, err)
 		}
 
@@ -337,19 +349,6 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 		}
 	}
 
-	// Export threads if any
-	threadParents := GetThreadParents(allMessages)
-	if len(threadParents) > 0 {
-		e.Progress("Exporting %d threads...", len(threadParents))
-		for _, parent := range threadParents {
-			if err := e.exportThread(ctx, conv.ID, parent); err != nil {
-				e.Progress("Warning: failed to export thread %s: %v", parent.TS, err)
-				// Continue with other threads
-			}
-			result.ThreadsExported++
-		}
-	}
-
 	// Update conversation export state — mark as complete
 	convExport.Status = "complete"
 	convExport.LastUpdated = time.Now()
@@ -371,7 +370,9 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 // exportThread exports a single thread to its own folder.
 func (e *Exporter) exportThread(ctx context.Context, convID string, parent slackapi.Message) error {
 	// Create topic preview from parent message
-	topicPreview := truncate(parent.Text, 40)
+	// Resolve the raw Slack mrkdwn to readable text for the folder name
+	resolvedText, _ := parser.ConvertMrkdwnWithLinks(parent.Text, e.userResolver, e.channelResolver, e.personResolver, nil)
+	topicPreview := truncate(resolvedText, 40)
 	if topicPreview == "" {
 		topicPreview = "Thread"
 	}
@@ -409,7 +410,7 @@ func (e *Exporter) exportThread(ctx context.Context, convID string, parent slack
 			return fmt.Errorf("failed to create thread doc: %w", err)
 		}
 
-		if err := e.docWriter.WriteMessages(ctx, docExport.DocID, msgs); err != nil {
+		if err := e.docWriter.WriteMessages(ctx, docExport.DocID, convID, threadExport.FolderID, msgs); err != nil {
 			return fmt.Errorf("failed to write thread messages: %w", err)
 		}
 
