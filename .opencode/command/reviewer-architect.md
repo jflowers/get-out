@@ -1,6 +1,6 @@
-# .opencode/commands/review-arch.md
+# .opencode/commands/reviewer-architect.md
 
-# Command: /review-arch
+# Command: /reviewer-architect
 # Model: XXX
 # Role: The Architect
 
