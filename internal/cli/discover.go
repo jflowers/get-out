@@ -12,6 +12,7 @@ import (
 
 	"github.com/jflowers/get-out/pkg/chrome"
 	"github.com/jflowers/get-out/pkg/config"
+	"github.com/jflowers/get-out/pkg/models"
 	"github.com/jflowers/get-out/pkg/slackapi"
 	"github.com/spf13/cobra"
 )
@@ -111,10 +112,18 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		client = slackapi.NewBrowserClient(creds.Token, creds.Cookie)
 	}
 
-	// Collect unique member IDs across all conversations
+	// Collect unique member IDs across channel conversations only.
+	// DMs and MPDMs are not accessible via bot token for member listing.
 	fmt.Println()
 	memberSet := make(map[string]bool)
+	skippedConvs := 0
 	for _, conv := range cfg.Conversations {
+		// Only fetch members from channels — bot tokens can't list DM/MPIM members
+		if conv.Type != models.ConversationTypeChannel && conv.Type != models.ConversationTypePrivateChannel {
+			skippedConvs++
+			continue
+		}
+
 		fmt.Printf("  Fetching members for %s (%s)...", conv.Name, conv.ID)
 
 		count := 0
@@ -155,7 +164,11 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Printf("\nFound %d unique members across all conversations\n", len(memberSet))
+	fmt.Printf("\nFound %d unique members across all channels", len(memberSet))
+	if skippedConvs > 0 {
+		fmt.Printf(" (skipped %d DMs/MPDMs)", skippedConvs)
+	}
+	fmt.Println()
 
 	// Load existing people.json if merging
 	peoplePath := filepath.Join(configDir, "people.json")

@@ -90,12 +90,23 @@ func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelReso
 			userID := matches[1]
 			displayName := ""
 
-			// Get display name
+			// Use inline display name if present in markup
 			if len(matches) >= 3 && matches[2] != "" {
 				displayName = matches[2]
-			} else if userResolver != nil {
+			}
+
+			// Try people.json first (primary source)
+			if displayName == "" && personResolver != nil {
+				displayName = personResolver.ResolveName(userID)
+			}
+
+			// Fall back to Slack API cache
+			if displayName == "" && userResolver != nil {
 				displayName = userResolver.Resolve(userID)
-			} else {
+			}
+
+			// Last resort: use raw ID
+			if displayName == "" {
 				displayName = userID
 			}
 
@@ -132,11 +143,34 @@ func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelReso
 		return match
 	})
 
-	// Replace URLs with text
-	result = urlWithTextPattern.ReplaceAllString(result, "$2 ($1)")
+	// Replace URLs with text — track link annotations
+	result = urlWithTextPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := urlWithTextPattern.FindStringSubmatch(match)
+		if len(matches) >= 3 {
+			url := matches[1]
+			displayText := matches[2]
+			links = append(links, LinkAnnotation{
+				Text: displayText,
+				URL:  url,
+			})
+			return displayText
+		}
+		return match
+	})
 
-	// Replace URLs without text (keep as-is but remove brackets)
-	result = urlOnlyPattern.ReplaceAllString(result, "$1")
+	// Replace URLs without text
+	result = urlOnlyPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := urlOnlyPattern.FindStringSubmatch(match)
+		if len(matches) >= 2 {
+			url := matches[1]
+			links = append(links, LinkAnnotation{
+				Text: url,
+				URL:  url,
+			})
+			return url
+		}
+		return match
+	})
 
 	// Replace special mentions
 	result = specialMentionPattern.ReplaceAllStringFunc(result, func(match string) string {

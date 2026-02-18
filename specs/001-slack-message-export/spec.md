@@ -42,6 +42,9 @@ As a Slack user, I want to export group thread conversations to Google Docs orga
 3. **Given** a thread spans multiple days, **When** exported, **Then** the thread folder contains daily-chunked docs (e.g., "2026-02-01.gdoc", "2026-02-02.gdoc") just like the main conversation
 4. **Given** a thread has replies from multiple users, **When** exported, **Then** each reply in the thread's daily docs shows the correct sender name (not user IDs like U12345)
 5. **Given** a daily doc contains a message that started a thread, **When** exported, **Then** the message includes a link to the thread's folder in the Threads subfolder
+6. **Given** a message starts a thread, **When** the thread folder is created, **Then** the folder name is sanitized (removing newlines/special characters) and truncated to ensure it remains a valid and readable name regardless of the message's length or complexity
+7. **Given** a Slack message contains an image, **When** exported, **Then** the image is downloaded and embedded directly within the generated Google Doc
+8. **Given** a Slack message contains a hyperlink, **When** exported, **Then** the hyperlink is preserved as a clickable link in the Google Doc
 
 ---
 
@@ -99,6 +102,9 @@ As a user exporting large volumes of messages, I want the tool to handle Slack's
 - What happens when messages contain special formatting (code blocks, emojis, attachments)? These should be preserved in Google Docs-compatible format where possible.
 - What happens when Google Drive API rate limits are hit? The tool should handle with exponential backoff similar to Slack API.
 - What happens when Google Drive authentication expires? The tool should prompt for re-authentication.
+- What happens when a Slack message contains images? The tool MUST download these images and embed them into the Google Doc. Large images should be scaled to fit the page width.
+- What happens when a first message of a thread contains newlines or is very long? The thread folder name MUST be sanitized (newlines removed) and truncated to a maximum length (e.g., 64-100 characters) to ensure compatibility.
+- What happens when messages contain standard hyperlinks? They MUST be preserved as clickable links in the output.
 - What happens when the user has no access to a requested conversation? The tool should report a clear access denied message.
 - What happens when a Slack link references a conversation not yet exported? The original Slack link should be preserved with a marker.
 - What happens when the user mapping file doesn't exist? Fall back to Slack names only without Google links.
@@ -132,6 +138,17 @@ As a user exporting large volumes of messages, I want the tool to handle Slack's
 - **FR-021**: System MUST support two extraction modes: API (bot token for channels) and Browser (session token for DMs/groups)
 - **FR-022**: System MUST support selective sharing via shareMembers list in config
 - **FR-023**: System MUST respect user opt-out preferences (noShare, noNotifications) from people.json
+- **FR-025**: System MUST embed images from Slack messages directly into the exported Google Docs
+- **FR-026**: System MUST sanitize and truncate thread folder names to ensure they are valid and within Drive/filesystem length limits
+- **FR-027**: System MUST preserve standard hyperlinks from Slack messages in the exported Google Docs as clickable links
+
+### Non-Functional Requirements
+
+- **NFR-001**: System MUST NOT close or modify any existing browser tabs, including on interruption (Ctrl+C) or error. The tool connects to the browser in a read-only manner to extract credentials and must leave the browser state completely unchanged.
+
+### Discover Command
+
+- **FR-024**: The `discover` command MUST only fetch member lists from channel and private channel conversations. DMs and MPDMs are not accessible via bot token and MUST be skipped.
 
 ### Key Entities
 

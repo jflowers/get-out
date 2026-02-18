@@ -1,8 +1,10 @@
 package gdrive
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"google.golang.org/api/drive/v3"
 )
@@ -219,15 +221,59 @@ func (c *Client) ShareFolderWithWriter(ctx context.Context, folderID, email stri
 	return nil
 }
 
+// UploadFile uploads a file to Google Drive.
+func (c *Client) UploadFile(ctx context.Context, name string, mimeType string, data []byte, parentID string) (string, error) {
+	file := &drive.File{
+		Name:     name,
+		MimeType: mimeType,
+	}
+	if parentID != "" {
+		file.Parents = []string{parentID}
+	}
+
+	res, err := c.Drive.Files.Create(file).
+		Media(bytes.NewReader(data)).
+		Context(ctx).
+		Fields("id, webContentLink").
+		Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to upload file %q: %w", name, err)
+	}
+	return res.Id, nil
+}
+
+// GetWebContentLink retrieves the web content link for a file.
+func (c *Client) GetWebContentLink(ctx context.Context, fileID string) (string, error) {
+	file, err := c.Drive.Files.Get(fileID).
+		Context(ctx).
+		Fields("webContentLink").
+		Do()
+	if err != nil {
+		return "", err
+	}
+	return file.WebContentLink, nil
+}
+
+// MakePublic makes a Drive file accessible to anyone with the link (reader role).
+func (c *Client) MakePublic(ctx context.Context, fileID string) error {
+	permission := &drive.Permission{
+		Type: "anyone",
+		Role: "reader",
+	}
+	_, err := c.Drive.Permissions.Create(fileID, permission).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("failed to make file %s public: %w", fileID, err)
+	}
+	return nil
+}
+
+// DeleteFile deletes a file from Google Drive.
+func (c *Client) DeleteFile(ctx context.Context, fileID string) error {
+	return c.Drive.Files.Delete(fileID).Context(ctx).Do()
+}
+
 // escapeName escapes single quotes in names for Drive API queries.
 func escapeName(name string) string {
-	result := make([]byte, 0, len(name))
-	for i := 0; i < len(name); i++ {
-		if name[i] == '\'' {
-			result = append(result, '\\', '\'')
-		} else {
-			result = append(result, name[i])
-		}
-	}
-	return string(result)
+	return strings.ReplaceAll(name, "'", "\\'")
 }
+

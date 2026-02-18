@@ -3,6 +3,7 @@ package exporter
 import (
 	"testing"
 
+	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/parser"
 	"github.com/jflowers/get-out/pkg/slackapi"
 )
@@ -112,7 +113,15 @@ func TestGetSenderName(t *testing.T) {
 		Profile: slackapi.UserProfile{DisplayName: "Former User"},
 	})
 
-	w := NewDocWriter(nil, resolver, nil, nil, nil)
+	// PersonResolver with display names from people.json
+	personResolver := parser.NewPersonResolver(&config.PeopleConfig{
+		People: []config.PersonConfig{
+			{SlackID: "U004", DisplayName: "Alice from People.json"},
+			{SlackID: "U001", DisplayName: "John from People.json"},
+		},
+	})
+
+	w := NewDocWriter(nil, nil, resolver, nil, personResolver, nil, nil)
 
 	tests := []struct {
 		name string
@@ -125,9 +134,9 @@ func TestGetSenderName(t *testing.T) {
 			want: "github-bot [bot]",
 		},
 		{
-			name: "regular user",
+			name: "user in both people.json and resolver - people.json wins",
 			msg:  slackapi.Message{User: "U001"},
-			want: "John Smith",
+			want: "John from People.json",
 		},
 		{
 			name: "bot user",
@@ -138,6 +147,11 @@ func TestGetSenderName(t *testing.T) {
 			name: "deleted user",
 			msg:  slackapi.Message{User: "U003"},
 			want: "Former User [deactivated]",
+		},
+		{
+			name: "user only in people.json - resolved from people.json",
+			msg:  slackapi.Message{User: "U004"},
+			want: "Alice from People.json",
 		},
 		{
 			name: "unknown user ID",

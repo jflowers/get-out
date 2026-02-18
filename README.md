@@ -12,7 +12,7 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 - **Slack link replacement**: Replaces Slack message URLs with links to the corresponding Google Docs
 - **Cross-conversation link resolution**: Second-pass scan resolves forward references across conversations
 - **Batch export**: `--all-dms` and `--all-groups` flags for bulk export by conversation type
-- **Parallel export**: `--parallel N` exports up to 5 conversations concurrently
+- **Parallel export**: `--parallel N` exports up to N conversations concurrently
 - **Checkpoint/Resume**: Granular checkpointing after each doc — resume crashed exports with `--resume`
 - **Incremental sync**: `--sync` mode exports only new messages since last run
 - **Pre-export validation**: Verifies Slack session and Google token before starting long exports
@@ -222,8 +222,8 @@ Start Chrome with remote debugging, then test the connection:
 ./get-out export --all-dms --config ./config
 ./get-out export --all-groups --config ./config
 
-# Export in parallel (up to 3 conversations at once)
-./get-out export --parallel 3 --config ./config
+# Export in parallel (up to 5 conversations at once)
+./get-out export --parallel 5 --config ./config
 
 # Sync mode - export only new messages since last run
 ./get-out export --sync --config ./config

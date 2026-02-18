@@ -478,3 +478,28 @@ func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, 
 
 	return nil
 }
+// DownloadFile downloads a file from Slack using the client's authentication.
+func (c *Client) DownloadFile(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set auth headers
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.mode == AuthModeBrowser && c.cookie != "" {
+		req.Header.Set("Cookie", "d="+c.cookie)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download file: status %s", resp.Status)
+	}
+
+	return io.ReadAll(resp.Body)
+}
