@@ -83,4 +83,28 @@ When making changes, always review and update:
 - Added --folder-id flag for exporting to existing Drive folders
 
 <!-- MANUAL ADDITIONS START -->
+
+# GOVERNANCE.md
+
+## Core Mission (Mission Command)
+- **Strategic Architecture:** Engineers shift from manual coding to directing an "infinite supply of junior developers" (AI agents).
+- **Outcome Orientation:** Focus on conveying business value and user intent rather than low-level technical sub-tasks.
+- **Intent-to-Context:** Treat specs and rules as the medium through which human intent is manifested into code.
+
+## Behavioral Constraints
+- **Zero-Waste Mandate:** No orphaned code, unused dependencies, or "Feature Zombie" bloat.
+- **Neighborhood Rule:** Changes must be audited for negative impacts on adjacent modules or the wider ecosystem.
+- **Intent Drift Detection:** Evaluation must detect when the implementation drifts away from the original human-written "Statement of Intent."
+- **Automated Governance:** Primary feedback is provided via automated constraints, reserving human energy for high-level security and logic.
+
+## Technical Guardrails
+- **WORM Persistence:** Use Write-Once-Read-Many patterns where data integrity is paramount.
+
+## Council Governance Protocol
+- **The Architect:** Must verify that "Intent Driving Implementation" is maintained.
+- **The Adversary:** Acts as the primary "Automated Governance" gate for security.
+- **The Guardian:** Detects "Intent Drift" to ensure the business value remains intact.
+
+**Rule:** A Pull Request is only "Ready for Human" once all three commands return an **APPROVE** status.
+
 <!-- MANUAL ADDITIONS END -->
