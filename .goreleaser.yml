@@ -20,22 +20,44 @@ archives:
     files:
       - README.md
       - LICENSE*
+      - man/get-out.1
+
+checksum:
+  name_template: checksums.txt
 
 changelog:
   sort: asc
   use: github
   groups:
-    - title: "🚀 Features"
+    - title: "Features"
       regexp: '^.*?feat(\(.+\))?\!?:.+$'
       order: 0
-    - title: "🐛 Bug Fixes"
+    - title: "Bug Fixes"
       regexp: '^.*?fix(\(.+\))?\!?:.+$'
       order: 1
-    - title: "📝 Documentation"
+    - title: "Documentation"
       regexp: '^.*?docs(\(.+\))?\!?:.+$'
       order: 2
-    - title: "🔧 Other"
+    - title: "Other"
       order: 999
+
+homebrew_casks:
+  - name: get-out
+    directory: Casks
+    repository:
+      owner: jflowers
+      name: homebrew-tools
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/jflowers/get-out
+    description: >-
+      Export Slack messages (DMs, groups, channels) to organized Google Docs
+    binaries:
+      - get-out
+    manpages:
+      - man/get-out.1
+    skip_upload: auto
+    commit_msg_template: >-
+      Brew cask update for {{ .ProjectName }} version {{ .Tag }}
 
 release:
   github:

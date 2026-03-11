@@ -1,0 +1,120 @@
+.TH GET\-OUT 1 "2026-03-11" "get-out" "User Commands"
+.SH NAME
+get\-out \- export Slack messages to Google Docs
+.SH SYNOPSIS
+.B get-out
+[\fIOPTIONS\fR]
+.I command
+[\fIcommand options\fR]
+.SH DESCRIPTION
+.B get-out
+exports Slack DMs, group messages, and channels to organized Google Docs in
+Google Drive. It supports browser-based extraction via Chrome DevTools Protocol
+and API-based extraction via a Slack bot token.
+.SH COMMANDS
+.TP
+.B init
+Initialize the configuration directory (\fI~/.get-out/\fR), migrate files from
+the old \fI~/.config/get-out/\fR location, create starter config templates,
+and prompt for a Google Drive folder ID.
+.TP
+.B auth login
+Authenticate with Google Drive and Docs APIs via OAuth 2.0. Opens a browser
+for the consent flow and saves the refresh token to \fItoken.json\fR.
+.TP
+.B auth status
+Display the current authentication status without opening a browser. Shows
+credentials path, token validity, expiry time, and connected Google account.
+Exits 1 when not authenticated.
+.TP
+.B doctor
+Run 10 health checks and print a styled pass/warn/fail summary. Exits 0 when
+all checks pass or only warnings exist; exits 1 on any failure.
+.TP
+.B setup-browser
+Run a guided 5-step wizard to verify Chrome is reachable, a Slack tab is open,
+and credentials can be extracted. Exits 0 when all steps pass; exits 1 on failure.
+.TP
+.B discover
+Fetch Slack conversation metadata and member lists from the active browser
+session and write/merge results into \fIpeople.json\fR.
+.TP
+.B list
+List all conversations configured in \fIconversations.json\fR with their ID,
+type, mode, and export flag.
+.TP
+.B export [\fIconversation_id\fR...]
+Export Slack messages to Google Docs. Exports all conversations where
+\fIexport=true\fR unless specific IDs are provided.
+.TP
+.B status
+Show export progress from \fIexport-index.json\fR: per-conversation status,
+message counts, doc counts, and last-updated timestamp.
+.SH OPTIONS
+.TP
+.B \-\-config \fIpath\fR
+Config directory path (default: \fI~/.get-out\fR).
+.TP
+.B \-\-chrome\-port \fIport\fR
+Chrome DevTools Protocol port (default: 9222).
+.TP
+.B \-\-debug
+Enable debug output.
+.TP
+.B \-v, \-\-verbose
+Verbose output — includes file paths in doctor output and tab URLs in
+setup-browser output.
+.TP
+.B \-\-version
+Print version information.
+.SH FILES
+.TP
+.I ~/.get-out/credentials.json
+Google OAuth 2.0 client credentials (downloaded from Google Cloud Console).
+Mode 0600 recommended.
+.TP
+.I ~/.get-out/token.json
+Saved OAuth refresh token. Created by \fBauth login\fR. Mode 0600 recommended.
+.TP
+.I ~/.get-out/settings.json
+Application settings. Fields: \fIfolder_id\fR (Drive folder ID),
+\fIslackBotToken\fR, \fIgoogleCredentialsFile\fR, \fIlogLevel\fR.
+.TP
+.I ~/.get-out/conversations.json
+List of Slack conversations to export with per-conversation settings.
+.TP
+.I ~/.get-out/people.json
+Mapping of Slack user IDs to display names and Google emails.
+.TP
+.I ~/.get-out/export-index.json
+Checkpoint index tracking exported docs, folder IDs, and message timestamps.
+.SH EXAMPLES
+Install via Homebrew and run initial setup:
+.PP
+.nf
+    brew tap jflowers/tools && brew install get-out
+    get-out init
+    get-out auth login
+    get-out setup-browser
+    get-out export
+.fi
+.PP
+Run health checks before a long export:
+.PP
+.nf
+    get-out doctor
+.fi
+.PP
+Export specific conversations by ID:
+.PP
+.nf
+    get-out export D123ABC456 C789DEF012
+.fi
+.PP
+Incremental sync — only new messages since last run:
+.PP
+.nf
+    get-out export --sync
+.fi
+.SH AUTHOR
+John Flowers <jflowers@users.noreply.github.com>

@@ -106,7 +106,12 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
 
-	// Apply settings as defaults (CLI flags override)
+	// Apply settings as defaults (CLI flags override).
+	// settings.FolderID (set by `get-out init`) takes priority over the legacy
+	// settings.GoogleDriveFolderID field.
+	if exportFolderID == "" && settings.FolderID != "" {
+		exportFolderID = settings.FolderID
+	}
 	if exportFolderID == "" && settings.GoogleDriveFolderID != "" {
 		exportFolderID = settings.GoogleDriveFolderID
 	}
