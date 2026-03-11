@@ -9,6 +9,15 @@ import (
 	"github.com/jflowers/get-out/pkg/models"
 )
 
+// DefaultConfigDir returns the default configuration directory (~/.get-out/).
+func DefaultConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".get-out"
+	}
+	return home + "/.get-out"
+}
+
 var (
 	// Slack ID patterns
 	conversationIDPattern = regexp.MustCompile(`^[CDGW][A-Z0-9]+$`)

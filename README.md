@@ -31,6 +31,13 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 
 ## Installation
 
+### Homebrew (macOS — recommended)
+
+```bash
+brew tap jflowers/tools
+brew install get-out
+```
+
 ### Pre-built Binaries
 
 Download the latest release from [GitHub Releases](https://github.com/jflowers/get-out/releases):
@@ -64,14 +71,15 @@ go build -o get-out ./cmd/get-out
 4. Create OAuth 2.0 credentials (Desktop application)
 5. Download `credentials.json` to your config directory
 
-### 2. Config Directory
+### 2. Initialize Configuration
 
-Create a config directory (default: `~/.config/get-out/`):
+Run `init` to scaffold the config directory (`~/.get-out/`):
 
 ```bash
-mkdir -p ~/.config/get-out
-# Place credentials.json here
+get-out init
 ```
+
+This creates `~/.get-out/`, migrates any existing `~/.config/get-out/` files, and prompts for your Google Drive folder ID.
 
 Or use a local config directory with `--config ./config`.
 
@@ -157,15 +165,37 @@ Map Slack user IDs to display names and preferences:
 
 ## Usage
 
+### Quick Start
+
+```bash
+# 1. Initialize config directory
+get-out init
+
+# 2. Authenticate with Google
+get-out auth login
+
+# 3. Verify Chrome + Slack setup
+get-out setup-browser
+
+# 4. Export
+get-out export
+```
+
 ### Authenticate with Google
 
 Run this first to complete OAuth flow:
 
 ```bash
-./get-out auth --config ./config
+get-out auth login
 ```
 
 This opens a browser for Google consent and saves the token.
+
+Check authentication status without opening a browser:
+
+```bash
+get-out auth status
+```
 
 ### Discover People
 
@@ -194,16 +224,16 @@ By default, new users are merged with existing `people.json` entries. Use `--no-
 ./get-out list --config ./config
 ```
 
-### Test Browser Connection
+### Browser Setup Wizard
 
-Start Chrome with remote debugging, then test the connection:
+Start Chrome with remote debugging, then run the guided wizard:
 
 ```bash
 # Start Chrome (macOS example)
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+open -a "Google Chrome" --args --remote-debugging-port=9222
 
-# Test connection and token extraction
-./get-out test --config ./config
+# Verify Chrome + Slack setup (5-step wizard)
+get-out setup-browser
 ```
 
 ### Export Messages
@@ -261,10 +291,7 @@ Shows conversation export progress: status (complete/in-progress), message count
 ### Global Flags
 
 ```
---config string      Config directory path (default "~/.config/get-out")
---chrome-port int    Chrome DevTools Protocol port (default 9222)
---debug              Enable debug output
--v, --verbose        Verbose output
+--config string      Config directory path (default "~/.get-out")
 ```
 
 ### Export Flags
@@ -311,12 +338,13 @@ get-out/
 ├── cmd/get-out/          # CLI entry point
 ├── internal/cli/         # Command implementations
 │   ├── root.go           # Base command and global flags
-│   ├── auth.go           # Google OAuth command
+│   ├── auth.go           # Google OAuth commands (auth login, auth status)
+│   ├── selfservice.go    # Self-service commands (init, doctor, setup-browser)
+│   ├── helpers.go        # Shared formatting helpers
 │   ├── discover.go       # Discover people from conversations
 │   ├── export.go         # Export command
 │   ├── list.go           # List conversations command
-│   ├── status.go         # Show export status
-│   └── test.go           # Test browser connection
+│   └── status.go         # Show export status
 ├── pkg/
 │   ├── chrome/           # Chrome DevTools Protocol client
 │   ├── slackapi/         # Slack API client (browser + bot modes)
@@ -364,8 +392,11 @@ get-out/
 
 ## Troubleshooting
 
+Run `get-out doctor` to check all common setup issues at once. It prints actionable fixes for each failing check.
+
 ### "No Slack tab found in browser"
 Make sure Chrome is running with `--remote-debugging-port=9222` and has an active Slack tab open.
+Run `get-out setup-browser` for a guided diagnosis.
 
 ### "Failed to connect to browser"
 Check that Chrome is running and the port matches `--chrome-port`.
@@ -374,7 +405,7 @@ Check that Chrome is running and the port matches `--chrome-port`.
 Ensure you're logged into Slack in the browser. Try refreshing the Slack tab.
 
 ### "Google credentials not found"
-Download `credentials.json` from Google Cloud Console and place it in your config directory.
+Download `credentials.json` from Google Cloud Console and place it in `~/.get-out/`.
 
 ## License
 

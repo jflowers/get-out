@@ -3,11 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-03-11
 
 ## Active Technologies
-- Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2 (003-distribution)
-- JSON files in `~/.get-out/` (config, token, export index) — no database (003-distribution)
-
-- Go 1.24 + Chromedp (CDP), cobra (CLI), sync.WaitGroup (concurrency)
-- Google Drive API v3 + Google Docs API
+- Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2
+- JSON files in `~/.get-out/` (config, token, export index) — no database
 
 ## Project Structure
 
@@ -16,9 +13,10 @@ get-out/
 ├── cmd/get-out/main.go       # CLI entry point
 ├── internal/cli/             # Command implementations
 │   ├── root.go               # Base command and global flags
-│   ├── auth.go               # Google OAuth command
+│   ├── auth.go               # Google OAuth commands (auth login, auth status)
+│   ├── selfservice.go        # Self-service commands (init, doctor, setup-browser)
+│   ├── helpers.go            # Shared formatting helpers
 │   ├── list.go               # List conversations command
-│   ├── test.go               # Test browser connection
 │   ├── export.go             # Export command
 │   ├── discover.go           # Discover Slack conversations command
 │   └── status.go             # Show export status command
@@ -47,14 +45,23 @@ go build -o get-out ./cmd/get-out
 
 ### Run
 ```bash
+# Initialize config directory (~/.get-out/)
+./get-out init
+
 # Authenticate with Google
-./get-out auth --config ./config
+./get-out auth login
+
+# Check authentication status
+./get-out auth status
+
+# Run health checks
+./get-out doctor
+
+# Verify Chrome + Slack setup (5-step wizard)
+./get-out setup-browser
 
 # List configured conversations
 ./get-out list --config ./config
-
-# Test Chrome connection
-./get-out test --config ./config
 
 # Discover and save conversations from Slack API
 ./get-out discover --config ./config
@@ -88,10 +95,8 @@ When making changes, always review and update:
 3. **Constitution** - Architectural decisions
 
 ## Recent Changes
-- 003-distribution: Added Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2
-
-- 001-slack-message-export: Core export functionality with browser mode
-- Added --folder-id flag for exporting to existing Drive folders
+- 003-distribution: Added init, doctor, auth login/status, setup-browser commands; charmbracelet/huh + lipgloss; config dir moved to ~/.get-out/; macOS signing + Homebrew tap release pipeline
+- 001-slack-message-export: Core export functionality with browser mode; --folder-id flag
 
 <!-- MANUAL ADDITIONS START -->
 

@@ -13,6 +13,10 @@ type Settings struct {
 	GoogleCredentialsFile string `json:"googleCredentialsFile,omitempty"`
 	GoogleDriveFolderID   string `json:"googleDriveFolderId,omitempty"`
 
+	// FolderID is the Google Drive folder ID used by default for exports.
+	// Set via `get-out init` or directly in settings.json.
+	FolderID string `json:"folder_id,omitempty"`
+
 	// Local export configuration (for future use)
 	LocalExportOutputDir string `json:"localExportOutputDir,omitempty"`
 

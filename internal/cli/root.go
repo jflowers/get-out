@@ -3,8 +3,8 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
+	"github.com/jflowers/get-out/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -40,21 +40,21 @@ and API-based authentication (for channels where a bot is installed).
 
 Prerequisites:
   1. Google Cloud project with Drive API and Docs API enabled
-  2. OAuth credentials.json in config directory
+  2. OAuth credentials.json in config directory (~/.get-out/)
   3. For browser mode: Chrome/Chromium running with remote debugging enabled
 
 Quick Start:
-  # Authenticate with Google
-  get-out auth
+  # Initialize configuration
+  get-out init
 
-  # List configured conversations
-  get-out list
+  # Authenticate with Google
+  get-out auth login
+
+  # Verify Chrome + Slack setup
+  get-out setup-browser
 
   # Export all configured conversations
-  get-out export
-
-  # Export a specific conversation
-  get-out export D123ABC456`,
+  get-out export`,
 	SilenceUsage: true,
 }
 
@@ -72,9 +72,5 @@ func init() {
 }
 
 func defaultConfigDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".config/get-out"
-	}
-	return fmt.Sprintf("%s/.config/get-out", home)
+	return config.DefaultConfigDir()
 }
