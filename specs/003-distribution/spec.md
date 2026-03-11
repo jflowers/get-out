@@ -37,7 +37,7 @@ An existing get-out user has their configuration in `~/.config/get-out/` (the ol
 
 1. **Given** `~/.config/get-out/` contains `conversations.json`, `people.json`, `credentials.json`, and `token.json`, and `~/.get-out/` does not exist, **When** the user runs `get-out init`, **Then** all four files are copied to `~/.get-out/`, a migration notice is printed listing each file, and the old directory is left untouched.
 2. **Given** migration has run and `~/.get-out/` is fully populated, **When** the user runs any existing command (e.g., `get-out list`, `get-out export`), **Then** the command reads config from `~/.get-out/` and functions identically to before the upgrade.
-3. **Given** `~/.get-out/` already exists and is non-empty, **When** the user runs `get-out init` again, **Then** no migration is attempted, existing files are not overwritten, and the command completes cleanly with a message indicating the directory is already set up.
+3. **Given** `~/.get-out/` already exists and is non-empty, **When** the user runs `get-out init` again, **Then** only managed files absent from `~/.get-out/` are copied from the old directory (if it exists); existing files in `~/.get-out/` are never overwritten, and the command completes cleanly.
 4. **Given** only `~/.get-out/` exists (no old dir), **When** the user runs `get-out doctor`, **Then** no migration warning is shown.
 5. **Given** both `~/.config/get-out/` and `~/.get-out/` exist, **When** the user runs `get-out doctor`, **Then** a warning is printed noting that the old directory still exists and can be deleted.
 
@@ -105,6 +105,7 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 - What happens when the macOS signing certificate has expired? The release workflow must detect signing failure and not publish broken assets; the `sign-macos` CI job must exit non-zero and block the Homebrew cask update.
 - What happens when `get-out setup-browser` is run on Linux (where macOS launch instructions are irrelevant)? Chrome launch instructions must be OS-appropriate.
 - What happens when both `~/.get-out/settings.json` has a `folder_id` AND `--folder-id` is passed on the command line? The command-line flag wins.
+- What happens if `credentials.json` or `token.json` already exist in `~/.get-out/` with world-readable permissions (e.g., copied manually)? `get-out doctor` MUST warn if either file has permissions broader than `0600`.
 
 ## Requirements *(mandatory)*
 
@@ -119,12 +120,12 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 
 **`init` Command**
 
-- **FR-005**: `get-out init` MUST create `~/.get-out/` with mode 0700 if it does not exist.
+- **FR-005**: `get-out init` MUST create `~/.get-out/` with mode 0700 if it does not exist. `credentials.json` and `token.json` MUST be written (or copied during migration) with mode 0600 (owner read/write only). All other files in the config directory use the process umask default.
 - **FR-006**: `get-out init` MUST write a minimal template `conversations.json` (`{"conversations":[]}`) if the file does not already exist in the target directory.
 - **FR-007**: `get-out init` MUST write a minimal template `settings.json` (`{}`) if the file does not already exist.
-- **FR-008**: `get-out init` MUST detect whether `~/.config/get-out/` exists and `~/.get-out/` was newly created (or contains none of the managed files), and if so copy each present managed file (`settings.json`, `conversations.json`, `people.json`, `credentials.json`, `token.json`) to `~/.get-out/`, printing a notice for each file copied.
+- **FR-008**: `get-out init` MUST detect whether `~/.config/get-out/` exists and, if so, copy each managed file (`settings.json`, `conversations.json`, `people.json`, `credentials.json`, `token.json`) from the old directory to `~/.get-out/` only if that file does not already exist in `~/.get-out/`. A notice MUST be printed for each file copied. Files already present in `~/.get-out/` are never overwritten by migration.
 - **FR-009**: `get-out init` MUST NOT delete the old `~/.config/get-out/` directory; it MUST print a notice that the old directory can be removed manually.
-- **FR-010**: `get-out init` MUST interactively prompt for the Google Drive folder ID when `--non-interactive` is not set and no `folder_id` is present in `settings.json`.
+- **FR-010**: `get-out init` MUST interactively prompt for the Google Drive folder ID when `--non-interactive` is not set and no `folder_id` is present in `settings.json`. When `--non-interactive` is set and `folder_id` is absent, `init` MUST succeed silently and leave `folder_id` unset; in that case `export` will continue to require the `--folder-id` flag at runtime.
 - **FR-011**: The folder ID prompt MUST validate that the entered value matches the format of a Google Drive ID (28 or more alphanumeric, hyphen, or underscore characters) before accepting it.
 - **FR-012**: On success, `get-out init` MUST print a "Next Steps" summary listing the remaining setup actions in order.
 
@@ -139,11 +140,13 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 
 **`doctor` Command**
 
-- **FR-019**: `get-out doctor` MUST execute the following 10 checks in order and print a styled pass/warn/fail result for each: (1) config dir exists with correct permissions, (2) `credentials.json` present, (3) `token.json` present, (4) token valid or refreshable, (5) Google Drive API reachable, (6) `conversations.json` present and parseable, (7) `people.json` present, (8) Chrome reachable on configured port, (9) Slack tab found in Chrome, (10) `export-index.json` present and readable.
+- **FR-019**: `get-out doctor` MUST execute the following 10 checks in order and print a styled pass/warn/fail result for each: (1) config dir exists with correct permissions, (2) `credentials.json` present, (3) `token.json` present, (4) token valid or refreshable, (5) Google Drive API reachable — verified by making an authenticated `drive.About.Get` call (exercises both network and credential validity), (6) `conversations.json` present and parseable, (7) `people.json` present, (8) Chrome reachable on configured port, (9) Slack tab found in Chrome, (10) `export-index.json` present and readable.
 - **FR-020**: Each failing check in `get-out doctor` MUST print a specific corrective action (e.g., command to run or file to create).
 - **FR-021**: `get-out doctor` MUST print a summary line showing counts of passed, warned, and failed checks.
+- **FR-021a**: `get-out doctor` MUST exit with code 0 when all checks pass or produce warnings only; it MUST exit with code 1 when one or more checks fail. This enables scripting patterns such as `get-out doctor && get-out export`.
 - **FR-022**: When `~/.config/get-out/` still exists alongside `~/.get-out/`, `get-out doctor` MUST display a warning suggesting the old directory can be deleted.
 - **FR-023**: `get-out doctor --verbose` MUST show the resolved file path for each checked resource inline on its check row.
+- **FR-023a**: `get-out doctor` MUST warn if `credentials.json` or `token.json` exist with file permissions broader than `0600` (e.g., group- or world-readable), and MUST suggest `chmod 0600 <path>` as the corrective action.
 
 **`setup-browser` Command**
 
@@ -185,6 +188,16 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 - **SC-005**: `get-out auth status` completes in under 3 seconds, including a silent token refresh if needed, with no browser window opened.
 - **SC-006**: The Homebrew cask SHA256 checksums in `jflowers/homebrew-tools` match the signed archives published to the GitHub release within 30 minutes of a tag being pushed.
 - **SC-007**: `get-out setup-browser` provides OS-appropriate Chrome launch instructions — macOS instructions on macOS, Linux instructions on Linux — without requiring the user to know which OS they are on.
+
+## Clarifications
+
+### Session 2026-03-11
+
+- Q: What should `get-out doctor`'s process exit code be? → A: Exit 0 if all pass or warn-only; exit 1 if any check fails.
+- Q: What should `get-out init --non-interactive` do when `folder_id` is absent? → A: Succeed silently; leave `folder_id` unset in `settings.json`.
+- Q: What constitutes "Google Drive API reachable" in `doctor` check #5? → A: An authenticated `drive.About.Get` call — exercises both network and credential validity.
+- Q: What file permissions should sensitive credential files have? → A: `credentials.json` and `token.json` written with mode 0600; other files use process umask default.
+- Q: When `~/.get-out/` is non-empty and the old dir also has files, how should migration proceed? → A: Copy only files not already present in `~/.get-out/`; never overwrite existing files.
 
 ## Assumptions
 
