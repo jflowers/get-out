@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-03-11
 
 ## Active Technologies
+- Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2 (003-distribution)
+- JSON files in `~/.get-out/` (config, token, export index) — no database (003-distribution)
 
 - Go 1.24 + Chromedp (CDP), cobra (CLI), sync.WaitGroup (concurrency)
 - Google Drive API v3 + Google Docs API
@@ -86,6 +88,7 @@ When making changes, always review and update:
 3. **Constitution** - Architectural decisions
 
 ## Recent Changes
+- 003-distribution: Added Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2
 
 - 001-slack-message-export: Core export functionality with browser mode
 - Added --folder-id flag for exporting to existing Drive folders
