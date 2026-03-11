@@ -1,6 +1,8 @@
 ---
 description: Perform a non-destructive cross-artifact consistency and quality analysis across spec.md, plan.md, and tasks.md after task generation.
 ---
+<!-- scaffolded by unbound vdev -->
+<!-- scaffolded by unbound vdev -->
 
 ## User Input
 

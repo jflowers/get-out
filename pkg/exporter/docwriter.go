@@ -127,13 +127,17 @@ func (w *DocWriter) messageToBlock(ctx context.Context, convID string, folderID 
 					// Upload to Drive temporarily
 					fileID, err := w.client.UploadFile(ctx, file.Name, file.Mimetype, data, folderID)
 					if err == nil {
-						// Make public for Docs API
+						// Make public temporarily for Docs API embed, then delete to
+						// prevent private Slack content from remaining publicly accessible.
 						if err := w.client.MakePublic(ctx, fileID); err == nil {
 							// Get web content link
 							url, err := w.client.GetWebContentLink(ctx, fileID)
 							if err == nil {
 								docImages = append(docImages, gdrive.ImageAnnotation{URL: url})
 							}
+							// Delete the temp Drive file regardless of whether we got
+							// the link — the public permission must not persist.
+							_ = w.client.DeleteFile(ctx, fileID)
 						}
 					}
 				}

@@ -33,7 +33,13 @@ type ExportIndex struct {
 }
 
 // ConversationExport tracks the export state of a single conversation.
+// mu protects all mutable fields when ExportConversation goroutines run in
+// parallel under ExportAllParallel. The index-level mutex (ExportIndex.mu)
+// protects the map that holds *ConversationExport pointers; this per-struct
+// mutex protects the struct fields themselves.
 type ConversationExport struct {
+	mu sync.Mutex `json:"-"` // not serialized
+
 	ID              string `json:"id"`
 	Name            string `json:"name"`
 	Type            string `json:"type"` // dm, mpim, channel, private_channel

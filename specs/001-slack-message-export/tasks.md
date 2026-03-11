@@ -19,7 +19,7 @@ Project structure from plan.md:
 - `cmd/get-out/` - CLI entry point
 - `pkg/` - Reusable libraries (chrome, slackapi, gdrive, parser, exporter, models)
 - `internal/cli/` - Cobra commands
-- `tests/` - Unit and integration tests
+- `pkg/*/`, `internal/cli/` - Tests live alongside source as `*_test.go` files (no separate tests/ directory)
 
 ---
 
@@ -28,10 +28,10 @@ Project structure from plan.md:
 **Purpose**: Initialize Go project structure and dependencies
 
 - [x] T001 Create project directory structure per plan.md (cmd/, pkg/, internal/, tests/)
-- [x] T002 Initialize go.mod with module `github.com/jflowers/get-out` and Go 1.21+
+- [x] T002 Initialize go.mod with module `github.com/jflowers/get-out` and Go 1.25+
 - [x] T003 [P] Add chromedp dependency `github.com/chromedp/chromedp v0.9.5`
-- [x] T004 [P] Add cobra dependency `github.com/spf13/cobra v1.8.0`
-- [x] T005 [P] Add errgroup dependency `golang.org/x/sync v0.6.0`
+- [x] T004 [P] Add cobra dependency `github.com/spf13/cobra v1.10.2`
+- [x] T005 [P] Add sync primitives (sync.WaitGroup + semaphore via channel) — no external errgroup dep needed
 - [x] T006 [P] Add Google API dependencies `google.golang.org/api v0.160.0` and `golang.org/x/oauth2 v0.16.0`
 - [x] T007 Create pkg/models/models.go with domain types from data-model.md (Conversation, Message, User, Reaction, Attachment, ExportSession, UserMapping, ExportIndex)
 - [x] T008 Create .gitignore for Go project (binaries, .env, credentials.json, token.json, user-mapping.json)
@@ -128,11 +128,11 @@ Project structure from plan.md:
 
 ### Tests for User Story 1
 
-- [x] T023 [P] [US1] Create tests/unit/parser_test.go with mrkdwn to Docs conversion tests (mentions, links, formatting)
-- [x] T024 [P] [US1] Create tests/unit/resolver_test.go with user ID resolution tests
-- [x] T025 [P] [US1] Create tests/integration/slackapi_test.go with mock HTTP server for conversations.history
-- [x] T026 [P] [US1] Create tests/unit/gdrive_test.go with Docs formatting request tests
-- [x] T027 [P] [US1] Create tests/unit/index_test.go with export index save/load tests
+- [x] T023 [P] [US1] Create pkg/parser/parser_test.go with mrkdwn to Docs conversion tests (mentions, links, formatting)
+- [x] T024 [P] [US1] Create pkg/parser/parser_test.go with user ID resolution tests
+- [x] T025 [P] [US1] Create pkg/slackapi/*_test.go with mock HTTP server for conversations.history
+- [x] T026 [P] [US1] Create pkg/gdrive/*_test.go with Docs formatting request tests
+- [x] T027 [P] [US1] Create pkg/exporter/index_test.go with export index save/load tests
 
 ### Implementation for User Story 1
 
@@ -182,8 +182,8 @@ Project structure from plan.md:
 
 ### Tests for User Story 2
 
-- [x] T036 [P] [US2] Add tests/unit/thread_test.go with thread detection, topic extraction, and daily grouping tests
-- [x] T037 [P] [US2] Add tests/integration/replies_test.go with mock for conversations.replies
+- [x] T036 [P] [US2] Add pkg/exporter/docwriter_test.go with thread detection, topic extraction, and daily grouping tests
+- [x] T037 [P] [US2] Add pkg/slackapi/*_test.go with mock for conversations.replies
 
 ### Implementation for User Story 2
 
@@ -213,7 +213,7 @@ Project structure from plan.md:
 
 ### Tests for User Story 3
 
-- [x] T045 [P] [US3] Create tests/unit/usermapping_test.go with mapping load and lookup tests
+- [x] T045 [P] [US3] Create pkg/parser/parser_test.go with mapping load and lookup tests
 
 ### Implementation for User Story 3
 
@@ -242,7 +242,7 @@ Project structure from plan.md:
 
 ### Tests for User Story 4
 
-- [x] T054 [P] [US4] Create tests/unit/linkreplacer_test.go with Slack URL parsing and replacement tests
+- [x] T054 [P] [US4] Create pkg/parser/parser_test.go with Slack URL parsing and replacement tests
 
 ### Implementation for User Story 4
 
@@ -273,8 +273,8 @@ Project structure from plan.md:
 
 ### Tests for User Story 5
 
-- [x] T060 [P] [US5] Create tests/unit/checkpoint_test.go with checkpoint save/load tests
-- [x] T061 [P] [US5] Create tests/unit/ratelimit_test.go with backoff calculation tests
+- [x] T060 [P] [US5] Create pkg/exporter/index_test.go with checkpoint save/load tests
+- [x] T061 [P] [US5] Create pkg/slackapi/*_test.go with backoff calculation tests
 
 ### Implementation for User Story 5
 

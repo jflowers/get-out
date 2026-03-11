@@ -180,7 +180,10 @@ func (c *Client) DeleteFolder(ctx context.Context, folderID string) error {
 	_, err := c.Drive.Files.Update(folderID, &drive.File{Trashed: true}).
 		Context(ctx).
 		Do()
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to delete folder %s: %w", folderID, err)
+	}
+	return nil
 }
 
 // ShareFolder shares a folder with a user.
@@ -249,7 +252,7 @@ func (c *Client) GetWebContentLink(ctx context.Context, fileID string) (string, 
 		Fields("webContentLink").
 		Do()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get web content link for %s: %w", fileID, err)
 	}
 	return file.WebContentLink, nil
 }
@@ -269,11 +272,13 @@ func (c *Client) MakePublic(ctx context.Context, fileID string) error {
 
 // DeleteFile deletes a file from Google Drive.
 func (c *Client) DeleteFile(ctx context.Context, fileID string) error {
-	return c.Drive.Files.Delete(fileID).Context(ctx).Do()
+	if err := c.Drive.Files.Delete(fileID).Context(ctx).Do(); err != nil {
+		return fmt.Errorf("failed to delete file %s: %w", fileID, err)
+	}
+	return nil
 }
 
 // escapeName escapes single quotes in names for Drive API queries.
 func escapeName(name string) string {
 	return strings.ReplaceAll(name, "'", "\\'")
 }
-

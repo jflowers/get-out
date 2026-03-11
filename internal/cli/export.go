@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -241,8 +242,14 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 	// --to should be end of day (23:59:59)
 	if dateTo != "" {
-		ts, _ := strconv.ParseInt(dateTo[:len(dateTo)-7], 10, 64) // strip .000000
-		ts += 86400 - 1                                           // end of day
+		// parseDateFlag always returns "NNNNNNNNNN.000000"; parse the integer
+		// part safely by splitting on "." instead of assuming a fixed length.
+		parts := strings.SplitN(dateTo, ".", 2)
+		ts, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("internal: failed to parse --to timestamp %q: %w", dateTo, err)
+		}
+		ts += 86400 - 1 // end of day
 		dateTo = fmt.Sprintf("%d.000000", ts)
 	}
 

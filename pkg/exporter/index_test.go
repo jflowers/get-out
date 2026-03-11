@@ -196,19 +196,22 @@ func TestExportIndex_Users(t *testing.T) {
 func TestExportIndex_LookupDocURL(t *testing.T) {
 	idx := NewExportIndex("")
 	idx.GetOrCreateConversation("C123", "test", "channel")
+	// Use a noon UTC timestamp (12:00:00 UTC) so the local-time date matches the UTC date
+	// regardless of timezone offset. 1705320000 = 2024-01-15 12:00:00 UTC.
+	// Midnight UTC timestamps fail in timezones west of UTC (the date shifts back one day).
 	idx.SetDailyDoc("C123", "2024-01-15", &DocExport{
 		DocID:         "d1",
 		DocURL:        "https://docs.google.com/document/d/d1",
 		Date:          "2024-01-15",
-		LastMessageTS: "1705363200.000000",
+		LastMessageTS: "1705320000.000000",
 	})
 
-	// Lookup with matching TS date
-	url := idx.LookupDocURL("C123", "1705363200.000000")
-	if url == "" {
-		// LookupDocURL may not find exact match depending on implementation
-		// but if it does, verify it's correct
-		t.Log("LookupDocURL returned empty (TS-to-date matching may need message date)")
+	// Lookup with matching TS date: 1705320000 = 2024-01-15 12:00:00 UTC
+	// LookupDocURL converts the TS to a local date and looks up the daily doc.
+	url := idx.LookupDocURL("C123", "1705320000.000000")
+	wantURL := "https://docs.google.com/document/d/d1"
+	if url != wantURL {
+		t.Errorf("LookupDocURL(C123, 1705320000.000000) = %q, want %q", url, wantURL)
 	}
 
 	// Lookup non-existent conversation

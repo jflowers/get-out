@@ -320,9 +320,17 @@ func TestFormatTimestamp(t *testing.T) {
 	// 1706745603 = 2024-01-31 at some time
 	ts := "1706745603.123456"
 	got := FormatTimestamp(ts)
-	// Just verify it doesn't panic and returns non-empty
+	// Verify format matches "H:MM PM" or "HH:MM PM/AM" pattern.
+	// The exact value is timezone-dependent, so we verify the format contract.
 	if got == "" {
 		t.Error("FormatTimestamp() returned empty string")
+	}
+	// Must contain a colon and end with AM or PM.
+	if len(got) < 5 {
+		t.Errorf("FormatTimestamp() = %q, too short to be a valid time", got)
+	}
+	if got[len(got)-2:] != "AM" && got[len(got)-2:] != "PM" {
+		t.Errorf("FormatTimestamp() = %q, does not end with AM or PM", got)
 	}
 }
 
@@ -332,9 +340,12 @@ func TestFormatTimestampFull(t *testing.T) {
 	if got == "" {
 		t.Error("FormatTimestampFull() returned empty string")
 	}
-	// Should contain a year
-	if len(got) < 10 {
-		t.Errorf("FormatTimestampFull() = %q, expected longer date string", got)
+	// Must contain a year (4 digits) and end with AM/PM.
+	if len(got) < 16 {
+		t.Errorf("FormatTimestampFull() = %q, expected longer date-time string", got)
+	}
+	if got[len(got)-2:] != "AM" && got[len(got)-2:] != "PM" {
+		t.Errorf("FormatTimestampFull() = %q, does not end with AM or PM", got)
 	}
 }
 

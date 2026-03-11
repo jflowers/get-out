@@ -73,7 +73,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	for _, t := range targets {
 		if t.Type == "page" {
 			indicator := "  "
-			if isSlackURL(t.URL) {
+			if chrome.IsSlackURL(t.URL) {
 				indicator = "* "
 			}
 			title := t.Title
@@ -112,25 +112,21 @@ func runTest(cmd *cobra.Command, args []string) error {
 	fmt.Println("Credentials:")
 	fmt.Printf("  Team Domain: %s\n", creds.TeamDomain)
 	fmt.Printf("  Team ID:     %s\n", creds.TeamID)
-	fmt.Printf("  Token:       %s...%s\n", creds.Token[:15], creds.Token[len(creds.Token)-4:])
-	fmt.Printf("  Cookie:      %s...%s\n", creds.Cookie[:15], creds.Cookie[len(creds.Cookie)-4:])
+	fmt.Printf("  Token:       %s\n", safePreview(creds.Token))
+	fmt.Printf("  Cookie:      %s\n", safePreview(creds.Cookie))
 	fmt.Println()
 	fmt.Println("Browser connection test PASSED!")
 
 	return nil
 }
 
-func isSlackURL(url string) bool {
-	return len(url) > 0 && (contains(url, "slack.com") || contains(url, "app.slack.com"))
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+// safePreview returns a masked preview of a credential string to avoid
+// exposing full tokens in terminal output or logs.
+func safePreview(s string) string {
+	if len(s) < 19 {
+		return "[" + fmt.Sprintf("%d chars]", len(s))
 	}
-	return false
+	return s[:15] + "..." + s[len(s)-4:]
 }
 
 func truncateURL(url string) string {

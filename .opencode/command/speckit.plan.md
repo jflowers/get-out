@@ -9,6 +9,8 @@ handoffs:
     agent: speckit.checklist
     prompt: Create a checklist for the following domain...
 ---
+<!-- scaffolded by unbound vdev -->
+<!-- scaffolded by unbound vdev -->
 
 ## User Input
 
@@ -69,10 +71,12 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Validation rules from requirements
    - State transitions if applicable
 
-2. **Generate API contracts** from functional requirements:
-   - For each user action → endpoint
-   - Use standard REST/GraphQL patterns
-   - Output OpenAPI/GraphQL schema to `/contracts/`
+2. **Define interface contracts** (if project has external interfaces) → `/contracts/`:
+   - Identify what interfaces the project exposes to users or other systems
+   - If `.specify/config.yaml` exists, read `project_type` to determine the contract format (library → public API, cli → command schema, web → endpoints, mobile → screens)
+   - Otherwise, infer the contract format from the project type
+   - Examples: public APIs for libraries, command schemas for CLI tools, endpoints for web services, grammars for parsers, UI contracts for applications
+   - Skip if project is purely internal (build scripts, one-off tools, etc.)
 
 3. **Agent context update**:
    - Run `.specify/scripts/bash/update-agent-context.sh opencode`

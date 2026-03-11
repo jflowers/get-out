@@ -42,17 +42,6 @@ var (
 	slackMessageLinkPattern = regexp.MustCompile(`https://[a-z0-9-]+\.slack\.com/archives/([A-Z0-9]+)/p(\d+)`)
 )
 
-// ParsedSegment represents a segment of parsed text with formatting.
-type ParsedSegment struct {
-	Text    string
-	Bold    bool
-	Italic  bool
-	Strike  bool
-	Code    bool
-	Link    string // URL if this is a link
-	Mention bool   // True if this is a @mention
-}
-
 // ConvertMrkdwn converts Slack mrkdwn to plain text with metadata about formatting.
 // This is a simplified version that returns plain text suitable for Google Docs.
 func ConvertMrkdwn(text string, userResolver *UserResolver, channelResolver *ChannelResolver) string {
@@ -208,21 +197,6 @@ func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelReso
 	return result, links
 }
 
-// ParseMrkdwnSegments parses Slack mrkdwn into segments with formatting metadata.
-// This allows applying rich formatting in Google Docs.
-func ParseMrkdwnSegments(text string, userResolver *UserResolver, channelResolver *ChannelResolver) []ParsedSegment {
-	var segments []ParsedSegment
-
-	// For now, return a single segment with the converted text
-	// TODO: Implement full segment parsing for rich formatting
-	converted := ConvertMrkdwn(text, userResolver, channelResolver)
-	if converted != "" {
-		segments = append(segments, ParsedSegment{Text: converted})
-	}
-
-	return segments
-}
-
 // ExtractSlackLinks finds Slack message/thread links in text.
 type SlackLink struct {
 	FullURL    string
@@ -243,6 +217,9 @@ func FindSlackLinks(text string) []SlackLink {
 			channelID := text[match[2]:match[3]]
 			// Convert p1234567890123456 to 1234567890.123456
 			pTimestamp := text[match[4]:match[5]]
+			if len(pTimestamp) < 10 {
+				continue // skip malformed timestamp
+			}
 			messageTS := pTimestamp[:10] + "." + pTimestamp[10:]
 
 			links = append(links, SlackLink{
@@ -265,6 +242,9 @@ func ReplaceSlackLinks(text string, linkResolver func(channelID, messageTS strin
 		if len(matches) >= 3 {
 			channelID := matches[1]
 			pTimestamp := matches[2]
+			if len(pTimestamp) < 10 {
+				return match // skip malformed timestamp
+			}
 			messageTS := pTimestamp[:10] + "." + pTimestamp[10:]
 
 			if replacement := linkResolver(channelID, messageTS); replacement != "" {

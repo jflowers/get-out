@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -132,7 +134,7 @@ func (s *Session) ListTargets(ctx context.Context) ([]TargetInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // 1 MB limit
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -179,21 +181,21 @@ func (s *Session) FindSlackTarget(ctx context.Context) (*TargetInfo, error) {
 	return nil, fmt.Errorf("no Slack tab found in browser")
 }
 
-// isSlackURL checks if a URL is a Slack page.
-func isSlackURL(url string) bool {
-	return len(url) > 0 && (contains(url, "slack.com") || contains(url, "app.slack.com"))
-}
-
-// contains is a simple substring check.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+// IsSlackURL checks if a URL belongs to Slack (slack.com or any *.slack.com subdomain).
+// It parses the URL and inspects the Host field to avoid false positives from URLs
+// that merely contain "slack.com" as a path segment (e.g. https://evil.com/slack.com).
+// Exported so CLI and other packages can use the same definition without duplicating it.
+func IsSlackURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
 	}
-	return false
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := u.Hostname() // strips port if present
+	return host == "slack.com" || strings.HasSuffix(host, ".slack.com")
 }
+
+// isSlackURL is the unexported alias used internally within this package.
+func isSlackURL(url string) bool { return IsSlackURL(url) }

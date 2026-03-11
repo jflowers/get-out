@@ -240,8 +240,11 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	}
 	result.FolderURL = convExport.FolderURL
 
-	// Set status to in_progress
+	// Set status to in_progress — hold the per-struct mutex so concurrent
+	// Save() calls that marshal this struct see a consistent snapshot.
+	convExport.mu.Lock()
 	convExport.Status = "in_progress"
+	convExport.mu.Unlock()
 
 	// Determine oldest/latest bounds
 	oldest := ""
@@ -338,23 +341,28 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 		result.MessageCount += len(msgs)
 		e.Progress("Wrote %d messages to %s", len(msgs), date)
 
-		// Save checkpoint after each daily doc
+		// Save checkpoint after each daily doc — hold the per-struct mutex so
+		// the index-level Save() sees a consistent view of this struct's fields.
+		convExport.mu.Lock()
 		if len(allMessages) > 0 {
 			convExport.LastMessageTS = allMessages[0].TS
 			convExport.MessageCount += len(msgs)
 			convExport.LastUpdated = time.Now()
 		}
+		convExport.mu.Unlock()
 		if err := e.index.Save(); err != nil {
 			e.Progress("Warning: failed to save checkpoint: %v", err)
 		}
 	}
 
-	// Update conversation export state — mark as complete
+	// Update conversation export state — mark as complete.
+	convExport.mu.Lock()
 	convExport.Status = "complete"
 	convExport.LastUpdated = time.Now()
 	if len(allMessages) > 0 {
 		convExport.LastMessageTS = allMessages[0].TS // Messages come in reverse order
 	}
+	convExport.mu.Unlock()
 
 	// Save final index
 	if err := e.index.Save(); err != nil {
@@ -519,11 +527,13 @@ func (e *Exporter) ExportAllParallel(ctx context.Context, conversations []config
 
 	var wg sync.WaitGroup
 
+outer:
 	for i, conv := range conversations {
-		// Check if context cancelled
+		// Check if context cancelled — use a labeled break to exit the for loop,
+		// not just the select (bare break inside select only exits the select).
 		select {
 		case <-ctx.Done():
-			break
+			break outer
 		default:
 		}
 

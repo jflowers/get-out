@@ -14,8 +14,8 @@ Both modes use Slack's REST API to retrieve message history with automatic rate 
 
 ## Technical Context
 
-**Language/Version**: Go 1.21+  
-**Primary Dependencies**: Chromedp (CDP), cobra (CLI), errgroup (concurrency), Google Drive API v3, Google Docs API v1  
+**Language/Version**: Go 1.25+  
+**Primary Dependencies**: Chromedp (CDP), cobra (CLI), sync.WaitGroup + semaphore (concurrency), Google Drive API v3, Google Docs API v1  
 **Storage**: JSON files for checkpoints (local), Google Docs for output (cloud)  
 **Testing**: Go standard testing package (`go test`)  
 **Target Platform**: macOS, Linux (CLI binary)  
@@ -34,7 +34,7 @@ Both modes use Slack's REST API to retrieve message history with automatic rate 
 | II. Go-First Architecture | PASS | Pure Go implementation with minimal dependencies |
 | III. Stealth & Reliability | PASS | Connects to existing browser; mirrors natural headers |
 | IV. Two-Tier Extraction | PASS | API mimicry as primary; DOM scraping deferred to future |
-| V. Concurrency & Resilience | PASS | errgroup + checkpoint system planned |
+| V. Concurrency & Resilience | PASS | sync.WaitGroup + semaphore + checkpoint system implemented |
 | VI. Security First | PASS | No hardcoded tokens; runtime extraction only |
 | VII. Output Format | PASS | Google Docs with proper formatting and user resolution |
 | VIII. Google Drive Integration | PASS | OAuth 2.0 auth; native Docs creation via API |
@@ -226,12 +226,11 @@ tests/
 // go.mod
 module github.com/jflowers/get-out
 
-go 1.21
+go 1.25
 
 require (
     github.com/chromedp/chromedp v0.9.5
-    github.com/spf13/cobra v1.8.0
-    golang.org/x/sync v0.6.0                    // errgroup
+    github.com/spf13/cobra v1.10.2
     golang.org/x/oauth2 v0.16.0                 // OAuth 2.0
     google.golang.org/api v0.160.0              // Google APIs
 )

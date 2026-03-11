@@ -3,11 +3,14 @@ package gdrive
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -81,19 +84,50 @@ func Authenticate(ctx context.Context, cfg *Config) (*http.Client, error) {
 
 // getTokenFromWeb starts a local server and initiates browser-based OAuth flow.
 func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
-	// Use a local redirect for desktop apps
-	config.RedirectURL = "http://localhost:8085/callback"
+	// Use the explicit IPv4 loopback address to match the server bind address.
+	// Using "localhost" risks sending callbacks to [::1] on IPv6-preferring systems
+	// while the server only listens on 127.0.0.1, silently breaking the auth flow.
+	config.RedirectURL = "http://127.0.0.1:8085/callback"
 
-	// Channel to receive the auth code
+	// Generate a cryptographically random state token to protect against CSRF.
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate OAuth state: %w", err)
+	}
+	expectedState := hex.EncodeToString(stateBytes)
+
+	// Channel to receive the auth code.
+	// errChan capacity 2: the callback handler and the ListenAndServe goroutine
+	// can both send concurrently; non-blocking sends below prevent goroutine leaks.
 	codeChan := make(chan string, 1)
-	errChan := make(chan error, 1)
+	errChan := make(chan error, 2)
 
-	// Start local server to receive callback
-	server := &http.Server{Addr: ":8085"}
-	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+	// Use a dedicated mux (not the global http.DefaultServeMux) so repeated
+	// calls don't panic with "multiple registrations for /callback".
+	mux := http.NewServeMux()
+	server := &http.Server{
+		Addr:         "127.0.0.1:8085", // bind to loopback only
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		// Validate CSRF state parameter
+		if r.URL.Query().Get("state") != expectedState {
+			http.Error(w, "invalid OAuth state parameter", http.StatusBadRequest)
+			select {
+			case errChan <- fmt.Errorf("invalid OAuth state: possible CSRF attack"):
+			default:
+			}
+			return
+		}
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			errChan <- fmt.Errorf("no code in callback")
+			select {
+			case errChan <- fmt.Errorf("no code in callback"):
+			default:
+			}
 			fmt.Fprintf(w, "Error: no authorization code received")
 			return
 		}
@@ -107,13 +141,16 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	})
 
 	go func() {
-		if err := server.ListenAndServe(); err != http.ErrServerClosed {
-			errChan <- err
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			select {
+			case errChan <- err:
+			default:
+			}
 		}
 	}()
 
-	// Generate auth URL
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	// Generate auth URL with the random state
+	authURL := config.AuthCodeURL(expectedState, oauth2.AccessTypeOffline)
 
 	fmt.Println()
 	fmt.Println("To authorize this application, visit this URL in your browser:")
@@ -128,15 +165,21 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	case code = <-codeChan:
 		// Success
 	case err := <-errChan:
-		server.Shutdown(ctx)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		server.Shutdown(shutdownCtx) //nolint:errcheck
 		return nil, err
 	case <-ctx.Done():
-		server.Shutdown(ctx)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		server.Shutdown(shutdownCtx) //nolint:errcheck
 		return nil, ctx.Err()
 	}
 
-	// Shutdown server
-	server.Shutdown(ctx)
+	// Shutdown server using a background context so it completes even if caller's ctx is done.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	server.Shutdown(shutdownCtx) //nolint:errcheck
 
 	// Exchange code for token
 	token, err := config.Exchange(ctx, code)

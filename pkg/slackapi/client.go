@@ -184,8 +184,8 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, params 
 		return &RateLimitError{RetryAfter: retryAfter}
 	}
 
-	// Read response body
-	data, err := io.ReadAll(resp.Body)
+	// Read response body (capped at 10 MB to prevent unbounded memory use)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}
@@ -478,6 +478,7 @@ func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, 
 
 	return nil
 }
+
 // DownloadFile downloads a file from Slack using the client's authentication.
 func (c *Client) DownloadFile(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -501,5 +502,7 @@ func (c *Client) DownloadFile(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to download file: status %s", resp.Status)
 	}
 
-	return io.ReadAll(resp.Body)
+	// Cap at 50 MB to prevent unbounded memory use for large file downloads.
+	const maxFileSize = 50 * 1024 * 1024
+	return io.ReadAll(io.LimitReader(resp.Body, maxFileSize))
 }

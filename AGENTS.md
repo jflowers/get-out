@@ -1,10 +1,10 @@
 # get-out Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-02-03
+Auto-generated from all feature plans. Last updated: 2026-03-11
 
 ## Active Technologies
 
-- Go 1.21+ + Chromedp (CDP), cobra (CLI), errgroup (concurrency)
+- Go 1.24 + Chromedp (CDP), cobra (CLI), sync.WaitGroup (concurrency)
 - Google Drive API v3 + Google Docs API
 
 ## Project Structure
@@ -17,7 +17,9 @@ get-out/
 │   ├── auth.go               # Google OAuth command
 │   ├── list.go               # List conversations command
 │   ├── test.go               # Test browser connection
-│   └── export.go             # Export command
+│   ├── export.go             # Export command
+│   ├── discover.go           # Discover Slack conversations command
+│   └── status.go             # Show export status command
 ├── pkg/
 │   ├── chrome/               # Chrome DevTools Protocol client
 │   ├── slackapi/             # Slack API client (browser + bot modes)
@@ -25,7 +27,7 @@ get-out/
 │   ├── exporter/             # Export orchestration and indexing
 │   ├── parser/               # Slack mrkdwn conversion
 │   ├── config/               # Configuration loading
-│   └── models/               # Shared data models
+│   └── models/               # Shared domain types (ConversationType, ExportMode)
 ├── config/                   # Configuration files (gitignored except examples)
 │   ├── settings.json         # Application settings (credentials paths, folder ID, etc.)
 │   ├── conversations.json    # Conversations to export
@@ -52,6 +54,12 @@ go build -o get-out ./cmd/get-out
 # Test Chrome connection
 ./get-out test --config ./config
 
+# Discover and save conversations from Slack API
+./get-out discover --config ./config
+
+# Show export status from checkpoint index
+./get-out status --config ./config
+
 # Export (dry run)
 ./get-out export --dry-run --config ./config
 
@@ -61,12 +69,12 @@ go build -o get-out ./cmd/get-out
 
 ### Test
 ```bash
-go test ./...
+go test -race -count=1 ./...
 ```
 
 ## Code Style
 
-- Go 1.21+: Follow standard Go conventions (gofmt, golint)
+- Go 1.24: Follow standard Go conventions (gofmt, golint)
 - Error handling: Wrap errors with context using fmt.Errorf
 - Logging: Use progress callbacks for user-facing output
 
