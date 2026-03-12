@@ -17,6 +17,7 @@ import (
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/exporter"
 	"github.com/jflowers/get-out/pkg/gdrive"
+	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/jflowers/get-out/pkg/slackapi"
 	"github.com/spf13/cobra"
 )
@@ -109,6 +110,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 			if err := migrateFiles(oldDir, newDir); err != nil {
 				return fmt.Errorf("migration failed: %w", err)
 			}
+			fmt.Println("Migration complete. You may delete ~/.config/get-out/ when ready.")
 		}
 	}
 
@@ -155,14 +157,38 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 6: Print next steps.
+	// Step 6: Migrate secrets to SecretStore (idempotent; safe to call every init).
+	if secretStore != nil {
+		interactive := !initNonInteractive
+		migratePromptFn := secrets.PromptFunc(func(message string) (bool, error) {
+			var confirm bool
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewConfirm().
+						Title(message).
+						Value(&confirm),
+				),
+			)
+			if err := form.Run(); err != nil {
+				return false, err
+			}
+			return confirm, nil
+		})
+		if err := secrets.Migrate(secretStore, configDir, interactive, migratePromptFn); err != nil {
+			// Non-fatal: log but don't fail init
+			fmt.Printf("Warning: secret migration incomplete: %v\n", err)
+		}
+	}
+
+	// Step 7: Print next steps.
 	fmt.Println()
 	nextSteps := `Next Steps:
   1. Copy credentials.json to ~/.get-out/
      (Download from: https://console.cloud.google.com/apis/credentials)
-  2. Run: get-out auth login
-  3. Run: get-out setup-browser
-  4. Run: get-out export`
+  2. Run: get-out init  (to migrate credentials to keychain)
+  3. Run: get-out auth login
+  4. Run: get-out setup-browser
+  5. Run: get-out export`
 	fmt.Println(boxStyle.Render(nextSteps))
 
 	return nil
@@ -285,21 +311,19 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println("─────────────────────────────────────────")
 	fmt.Println()
 
-	// Check 1: Config directory
-	checkConfigDir(configDir, &passCount, &warnCount, &failCount)
+	// Check 1: Config directory (also reports active secret backend)
+	checkConfigDir(configDir, secretBackend, &passCount, &warnCount, &failCount)
 
-	// Check 2: credentials.json
-	credPath := filepath.Join(configDir, "credentials.json")
-	checkFile("credentials.json", credPath, true, "Download from: https://console.cloud.google.com/apis/credentials", &passCount, &warnCount, &failCount)
+	// Check 2: credentials (via SecretStore)
+	checkSecret("credentials", secrets.KeyClientCredentials, secretStore, "Download credentials.json from: https://console.cloud.google.com/apis/credentials\n    Then run: get-out init  (to migrate to keychain)", &passCount, &failCount)
 
-	// Check 3: token.json
-	tokenPath := filepath.Join(configDir, "token.json")
-	tokenPresent := checkFile("token.json", tokenPath, true, "Run: get-out auth login", &passCount, &warnCount, &failCount)
+	// Check 3: token (via SecretStore)
+	tokenPresent := checkSecret("token", secrets.KeyOAuthToken, secretStore, "Run: get-out auth login", &passCount, &failCount)
 
 	// Check 4: OAuth token validity
 	gdriveAPIOK := false
 	if tokenPresent {
-		gdriveAPIOK = checkTokenValidity(configDir, &passCount, &warnCount, &failCount)
+		gdriveAPIOK = checkTokenValidity(configDir, secretStore, &passCount, &warnCount, &failCount)
 	} else {
 		warn("OAuth token check skipped (token.json absent)")
 		warnCount++
@@ -307,7 +331,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Check 5: Drive API
 	if gdriveAPIOK {
-		checkDriveAPI(configDir, &passCount, &warnCount, &failCount)
+		checkDriveAPI(configDir, secretStore, &passCount, &warnCount, &failCount)
 	} else {
 		warn("Drive API check skipped")
 		warnCount++
@@ -362,8 +386,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// checkConfigDir checks check 1.
-func checkConfigDir(dir string, pass_, warn_, fail_ *int) {
+// checkConfigDir checks check 1 — config directory existence, permissions, and secret backend.
+func checkConfigDir(dir string, backend secrets.Backend, pass_, warn_, fail_ *int) {
 	info, err := os.Stat(dir)
 	if err != nil {
 		fail(fmt.Sprintf("Config directory not found: %s", dir))
@@ -376,7 +400,7 @@ func checkConfigDir(dir string, pass_, warn_, fail_ *int) {
 		*fail_++
 		return
 	}
-	pass("Config directory exists")
+	pass(fmt.Sprintf("Config directory exists (secret storage: %s)", backend))
 	if verbose {
 		fmt.Println(dimStyle.Render("    " + dir))
 	}
@@ -386,6 +410,20 @@ func checkConfigDir(dir string, pass_, warn_, fail_ *int) {
 		hint(fmt.Sprintf("Run: chmod 700 %s", dir))
 		*warn_++
 	}
+}
+
+// checkSecret checks whether a secret key is present in the SecretStore (checks 2 and 3).
+// Returns true if the secret is present.
+func checkSecret(name, key string, store secrets.SecretStore, fixMsg string, pass_, fail_ *int) bool {
+	if _, err := store.Get(key); err != nil {
+		fail(name + " not found in secret store")
+		hint(fixMsg)
+		*fail_++
+		return false
+	}
+	pass(name + " present")
+	*pass_++
+	return true
 }
 
 // checkFile checks whether a file exists (checks 2 and 3).
@@ -424,9 +462,8 @@ func checkFile(name, path string, mustExist bool, fixMsg string, pass_, warn_, f
 }
 
 // checkTokenValidity checks check 4. Returns whether a Drive API call can proceed.
-func checkTokenValidity(dir string, pass_, warn_, fail_ *int) bool {
-	cfg := gdrive.DefaultConfig(dir)
-	token, err := loadTokenForDoctor(cfg.TokenPath)
+func checkTokenValidity(dir string, store secrets.SecretStore, pass_, warn_, fail_ *int) bool {
+	token, err := gdrive.LoadTokenFromStore(store)
 	if err != nil {
 		fail("OAuth token: unreadable — " + err.Error())
 		hint("Run: get-out auth login")
@@ -479,12 +516,12 @@ func (t *oauthToken) Valid() bool {
 }
 
 // checkDriveAPI checks check 5.
-func checkDriveAPI(dir string, pass_, warn_, fail_ *int) {
+func checkDriveAPI(dir string, store secrets.SecretStore, pass_, warn_, fail_ *int) {
 	cfg := gdrive.DefaultConfig(dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := gdrive.Authenticate(ctx, cfg)
+	client, err := gdrive.AuthenticateWithStore(ctx, cfg, store)
 	if err != nil {
 		fail("Drive API: authentication error — " + err.Error())
 		hint("Run: get-out auth login")
@@ -547,6 +584,14 @@ func checkPeople(dir string, pass_, warn_, fail_ *int) {
 	*pass_++
 }
 
+// chromeLaunchCmd returns the OS-appropriate command to launch Chrome with remote debugging.
+func chromeLaunchCmd(goos string, port int) string {
+	if goos == "darwin" {
+		return fmt.Sprintf(`open -a "Google Chrome" --args --remote-debugging-port=%d`, port)
+	}
+	return fmt.Sprintf("google-chrome --remote-debugging-port=%d", port)
+}
+
 // checkChrome checks check 8. Returns true if Chrome is reachable.
 func checkChrome(port int, pass_, warn_, fail_ *int) bool {
 	url := fmt.Sprintf("http://127.0.0.1:%d/json/version", port)
@@ -554,11 +599,7 @@ func checkChrome(port int, pass_, warn_, fail_ *int) bool {
 	resp, err := client.Get(url)
 	if err != nil {
 		fail(fmt.Sprintf("Chrome not reachable on port %d", port))
-		if runtime.GOOS == "darwin" {
-			hint(fmt.Sprintf(`Open Chrome with: open -a "Google Chrome" --args --remote-debugging-port=%d`, port))
-		} else {
-			hint(fmt.Sprintf("Open Chrome with: google-chrome --remote-debugging-port=%d", port))
-		}
+		hint(fmt.Sprintf("Open Chrome with: %s", chromeLaunchCmd(runtime.GOOS, port)))
 		*fail_++
 		return false
 	}
@@ -658,6 +699,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	stepFailed := false
+	slackTabFound := false
 
 	// Step 1: Chrome reachability
 	fmt.Print("Step 1  Chrome reachable on port ")
@@ -668,13 +710,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		fmt.Println(failStyle.Render("FAIL"))
 		stepFailed = true
-		if runtime.GOOS == "darwin" {
-			fmt.Println(dimStyle.Render(fmt.Sprintf(
-				`  Launch Chrome: open -a "Google Chrome" --args --remote-debugging-port=%d`, chromePort)))
-		} else {
-			fmt.Println(dimStyle.Render(fmt.Sprintf(
-				"  Launch Chrome: google-chrome --remote-debugging-port=%d", chromePort)))
-		}
+		fmt.Println(dimStyle.Render(fmt.Sprintf("  Launch Chrome: %s", chromeLaunchCmd(runtime.GOOS, chromePort))))
 	} else {
 		resp.Body.Close()
 		fmt.Println(passStyle.Render("OK"))
@@ -729,8 +765,10 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 			if found == 0 {
 				fmt.Println(warnStyle.Render("WARN (no Slack tab found)"))
 				fmt.Println(dimStyle.Render("  Open https://app.slack.com in Chrome and log in"))
-				// Note: step 3 is warn-only; stepFailed stays false
+				// step 3 is warn-only; stepFailed stays false but slackTabFound stays false
+				// so steps 4–5 are skipped (nothing to extract without a Slack tab)
 			} else {
+				slackTabFound = true
 				msg := fmt.Sprintf("OK (%d tab(s))", found)
 				if verbose {
 					msg += "  " + slackURL
@@ -743,7 +781,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	// Step 4: Extract credentials
 	fmt.Print("Step 4  Extract Slack credentials ... ")
 	var creds interface{ GetToken() string }
-	if stepFailed || session == nil {
+	if stepFailed || session == nil || !slackTabFound {
 		fmt.Println(dimStyle.Render("Skipped"))
 	} else {
 		ctx4, cancel4 := context.WithTimeout(context.Background(), 15*time.Second)

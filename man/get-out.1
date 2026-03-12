@@ -65,6 +65,11 @@ Enable debug output.
 Verbose output — includes file paths in doctor output and tab URLs in
 setup-browser output.
 .TP
+.B \-\-no\-keyring
+Disable OS keychain integration. Secrets (credentials, token) are stored in
+plaintext files with mode 0600 in the config directory instead of the system
+keychain. Useful in CI/CD environments or when keychain access is unavailable.
+.TP
 .B \-\-version
 Print version information.
 .SH FILES

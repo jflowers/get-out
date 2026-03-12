@@ -8,6 +8,7 @@ import (
 
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/gdrive"
+	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +67,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	fmt.Println("=====================")
 	fmt.Println()
 
-	// Load settings to check for custom credentials path
+	// Load settings to check for custom credentials path (for fallback path display)
 	settingsPath := filepath.Join(configDir, "settings.json")
 	settings, err := config.LoadSettings(settingsPath)
 	if err != nil {
@@ -78,9 +79,9 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		cfg.CredentialsPath = settings.GoogleCredentialsFile
 	}
 
-	// Check for credentials
-	if !gdrive.HasCredentials(cfg) {
-		fmt.Println("ERROR: credentials.json not found")
+	// Check for credentials via store
+	if _, err := secretStore.Get(secrets.KeyClientCredentials); err != nil {
+		fmt.Println("ERROR: credentials not found")
 		fmt.Println()
 		fmt.Printf("Please download OAuth credentials from Google Cloud Console\n")
 		fmt.Printf("and save them to: %s\n", cfg.CredentialsPath)
@@ -89,24 +90,24 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		fmt.Println("  1. Go to https://console.cloud.google.com/apis/credentials")
 		fmt.Println("  2. Create OAuth 2.0 Client ID (Desktop application)")
 		fmt.Println("  3. Download JSON and save as credentials.json")
+		fmt.Println("  4. Run: get-out init  (to migrate credentials to keychain)")
 		fmt.Println()
 		fmt.Println("Also ensure these APIs are enabled:")
 		fmt.Println("  - Google Drive API")
 		fmt.Println("  - Google Docs API")
-		return fmt.Errorf("credentials.json not found at %s", cfg.CredentialsPath)
+		return fmt.Errorf("credentials not found in store or at %s", cfg.CredentialsPath)
 	}
 
 	// Check if already authenticated
-	if gdrive.IsTokenValid(cfg) {
+	if token, err := gdrive.LoadTokenFromStore(secretStore); err == nil && token.Valid() {
 		fmt.Println("Already authenticated!")
-		fmt.Printf("Token file: %s\n", cfg.TokenPath)
 		fmt.Println()
-		fmt.Println("To re-authenticate, delete the token file and run this command again.")
+		fmt.Println("To re-authenticate, delete the stored token and run this command again:")
+		fmt.Println("  get-out auth login  (will re-run the OAuth flow)")
 		return nil
 	}
 
-	fmt.Printf("Credentials: %s\n", cfg.CredentialsPath)
-	fmt.Printf("Token will be saved to: %s\n", cfg.TokenPath)
+	fmt.Printf("Secret storage: %s\n", secretBackend)
 	fmt.Println()
 
 	// Start OAuth flow
@@ -114,7 +115,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	fmt.Println("Starting OAuth flow...")
-	client, err := gdrive.Authenticate(ctx, cfg)
+	client, err := gdrive.AuthenticateWithStore(ctx, cfg, secretStore)
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
@@ -154,39 +155,40 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		cfg.CredentialsPath = settings.GoogleCredentialsFile
 	}
 
-	// Check 1: credentials.json
-	if gdrive.HasCredentials(cfg) {
-		fmt.Printf("Credentials: ✓ found (%s)\n", cfg.CredentialsPath)
+	// Check 1: credentials in store
+	if _, err := secretStore.Get(secrets.KeyClientCredentials); err == nil {
+		fmt.Printf("Credentials: ✓ found (%s)\n", secretBackend)
 	} else {
-		fmt.Printf("Credentials: ✗ not found (%s)\n", cfg.CredentialsPath)
+		fmt.Printf("Credentials: ✗ not found\n")
+		fmt.Printf("             → Place credentials.json at %s and run: get-out init\n", cfg.CredentialsPath)
 	}
 
-	// Check 2: token.json
-	if !gdrive.HasToken(cfg) {
-		fmt.Printf("Token:       ✗ not found (%s)\n", cfg.TokenPath)
-		fmt.Println("→ Run: get-out auth login")
+	// Check 2: token in store
+	if _, err := secretStore.Get(secrets.KeyOAuthToken); err != nil {
+		fmt.Printf("Token:       ✗ not found\n")
+		fmt.Println("             → Run: get-out auth login")
 		return fmt.Errorf("not authenticated")
 	}
-	fmt.Printf("Token:       ✓ found (%s)\n", cfg.TokenPath)
+	fmt.Printf("Token:       ✓ found (%s)\n", secretBackend)
 
 	// Check 3: token validity + silent refresh
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := gdrive.EnsureTokenFresh(ctx, cfg); err != nil {
+	if err := gdrive.EnsureTokenFreshWithStore(ctx, cfg, secretStore); err != nil {
 		fmt.Println("Token:       ✗ expired and could not be refreshed")
-		fmt.Println("→ Run: get-out auth login")
+		fmt.Println("             → Run: get-out auth login")
 		return fmt.Errorf("token expired: %w", err)
 	}
 
 	// Read expiry for display (re-read after potential refresh)
-	token, err := loadTokenForDoctor(cfg.TokenPath)
+	token, err := gdrive.LoadTokenFromStore(secretStore)
 	if err == nil {
 		fmt.Printf("Expiry:      %s\n", token.Expiry.Local().Format("2006-01-02 15:04:05 MST"))
 	}
 
 	// Check 4: Drive API call to get email
-	httpClient, err := gdrive.Authenticate(ctx, cfg)
+	httpClient, err := gdrive.AuthenticateWithStore(ctx, cfg, secretStore)
 	if err != nil {
 		fmt.Println("Drive API:   ✗ could not authenticate")
 		return fmt.Errorf("drive authentication failed: %w", err)

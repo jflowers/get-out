@@ -62,13 +62,15 @@ Make sure the following APIs are enabled in your project:
 - Google Drive API
 - Google Docs API
 
+> **Keychain note**: On macOS (and Linux with a Secret Service daemon), `get-out init` automatically migrates `credentials.json` into your OS keychain and offers to delete the plaintext file. This is the recommended setup. If you prefer to keep the file on disk (e.g., in a shared/CI environment), use `--no-keyring`.
+
 ### 3. Authenticate with Google
 
 ```bash
 get-out auth login
 ```
 
-This opens a browser window for Google OAuth consent. After you approve, the token is saved to `~/.get-out/token.json`.
+This opens a browser window for Google OAuth consent. After you approve, the token is stored in the OS keychain (or in `~/.get-out/token.json` if `--no-keyring` is set or the keychain is unavailable).
 
 ### 4. Connect Chrome to Slack
 
@@ -233,6 +235,7 @@ This shows the resolved path for every checked resource.
 | `--chrome-port <n>` | `9222` | Chrome DevTools Protocol port |
 | `--verbose` / `-v` | false | Verbose output |
 | `--debug` | false | Debug output |
+| `--no-keyring` | false | Disable OS keychain; keep secrets in plaintext files (0600) |
 
 Example using a custom config dir (e.g., for a second Slack workspace):
 

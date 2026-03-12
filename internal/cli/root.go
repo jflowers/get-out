@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jflowers/get-out/pkg/config"
+	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -14,6 +15,12 @@ var (
 	chromePort int
 	configDir  string
 	verbose    bool
+	noKeyring  bool
+
+	// secretStore is the active SecretStore, initialized by PersistentPreRunE.
+	secretStore secrets.SecretStore
+	// secretBackend is the active backend, set alongside secretStore.
+	secretBackend secrets.Backend
 
 	// Build info (set via SetVersion)
 	buildVersion = "dev"
@@ -56,6 +63,10 @@ Quick Start:
   # Export all configured conversations
   get-out export`,
 	SilenceUsage: true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		secretStore, secretBackend = secrets.NewStore(noKeyring, configDir)
+		return nil
+	},
 }
 
 // Execute runs the root command.
@@ -69,6 +80,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&chromePort, "chrome-port", 9222, "Chrome DevTools Protocol port")
 	rootCmd.PersistentFlags().StringVar(&configDir, "config", defaultConfigDir(), "Config directory path")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.PersistentFlags().BoolVar(&noKeyring, "no-keyring", false, "Disable OS keychain; store secrets in plaintext files (0600)")
 }
 
 func defaultConfigDir() string {

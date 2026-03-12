@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jflowers/get-out/pkg/secrets"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/docs/v1"
@@ -221,6 +222,111 @@ func saveToken(path string, token *oauth2.Token) error {
 	defer f.Close()
 
 	return json.NewEncoder(f).Encode(token)
+}
+
+// LoadTokenFromStore retrieves and parses a token from the SecretStore.
+func LoadTokenFromStore(store secrets.SecretStore) (*oauth2.Token, error) {
+	return loadTokenFromStore(store)
+}
+
+// loadTokenFromStore retrieves and parses a token from the SecretStore.
+func loadTokenFromStore(store secrets.SecretStore) (*oauth2.Token, error) {
+	data, err := store.Get(secrets.KeyOAuthToken)
+	if err != nil {
+		return nil, err
+	}
+	var token oauth2.Token
+	if err := json.Unmarshal([]byte(data), &token); err != nil {
+		return nil, fmt.Errorf("parse token from store: %w", err)
+	}
+	return &token, nil
+}
+
+// saveTokenToStore serializes a token and writes it to the SecretStore.
+func saveTokenToStore(store secrets.SecretStore, token *oauth2.Token) error {
+	data, err := json.Marshal(token)
+	if err != nil {
+		return fmt.Errorf("marshal token: %w", err)
+	}
+	return store.Set(secrets.KeyOAuthToken, string(data))
+}
+
+// AuthenticateWithStore performs the OAuth 2.0 flow using a SecretStore for
+// credential and token I/O. This is the preferred function for CLI commands.
+// If a saved token exists and is valid (or has a refresh token), it is reused.
+// Otherwise, a browser-based consent flow is initiated.
+func AuthenticateWithStore(ctx context.Context, cfg *Config, store secrets.SecretStore) (*http.Client, error) {
+	// Read credentials from store
+	credData, err := store.Get(secrets.KeyClientCredentials)
+	if err != nil {
+		return nil, fmt.Errorf("credentials not found in store (run 'get-out auth login' after placing credentials.json): %w", err)
+	}
+
+	oauthConfig, err := google.ConfigFromJSON([]byte(credData), Scopes...)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse credentials: %w", err)
+	}
+
+	// Try to load existing token from store
+	token, err := loadTokenFromStore(store)
+	if err == nil {
+		if token.Valid() || token.RefreshToken != "" {
+			return oauthConfig.Client(ctx, token), nil
+		}
+	}
+
+	// Need to get new token via browser flow
+	token, err = getTokenFromWeb(ctx, oauthConfig)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get token: %w", err)
+	}
+
+	// Save token to store
+	if err := saveTokenToStore(store, token); err != nil {
+		fmt.Printf("Warning: could not save token to store: %v\n", err)
+	}
+
+	return oauthConfig.Client(ctx, token), nil
+}
+
+// EnsureTokenFreshWithStore checks if the saved Google OAuth token is still
+// valid and refreshes it if needed, using a SecretStore for I/O.
+func EnsureTokenFreshWithStore(ctx context.Context, cfg *Config, store secrets.SecretStore) error {
+	token, err := loadTokenFromStore(store)
+	if err != nil {
+		return fmt.Errorf("no saved Google token found, run 'get-out auth login' first: %w", err)
+	}
+
+	if token.Valid() {
+		return nil
+	}
+
+	if token.RefreshToken == "" {
+		return fmt.Errorf("Google token expired and no refresh token available, run 'get-out auth login' to re-authenticate")
+	}
+
+	// Read credentials to build oauth config
+	credData, err := store.Get(secrets.KeyClientCredentials)
+	if err != nil {
+		return fmt.Errorf("unable to read credentials for token refresh: %w", err)
+	}
+
+	oauthConfig, err := google.ConfigFromJSON([]byte(credData), Scopes...)
+	if err != nil {
+		return fmt.Errorf("unable to parse credentials: %w", err)
+	}
+
+	tokenSource := oauthConfig.TokenSource(ctx, token)
+	newToken, err := tokenSource.Token()
+	if err != nil {
+		return fmt.Errorf("Google token refresh failed, run 'get-out auth login' to re-authenticate: %w", err)
+	}
+
+	if err := saveTokenToStore(store, newToken); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not save refreshed token to store: %v\n", err)
+	}
+
+	return nil
 }
 
 // HasCredentials checks if credentials.json exists.

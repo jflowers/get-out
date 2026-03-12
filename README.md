@@ -292,6 +292,10 @@ Shows conversation export progress: status (complete/in-progress), message count
 
 ```
 --config string      Config directory path (default "~/.get-out")
+--no-keyring         Disable OS keychain; store secrets in plaintext files (0600)
+--chrome-port int    Chrome DevTools Protocol port (default 9222)
+-v, --verbose        Verbose output
+--debug              Enable debug output
 ```
 
 ### Export Flags
@@ -386,7 +390,7 @@ get-out/
 ## Security Notes
 
 - Tokens are extracted at runtime from active browser sessions
-- Google OAuth tokens are stored locally in `token.json`
+- Google OAuth credentials and tokens are stored in the OS keychain (macOS Keychain, Linux Secret Service) by default; use `--no-keyring` to fall back to 0600 plaintext files in `~/.get-out/`
 - Never commit `credentials.json`, `token.json`, or `conversations.json` with real data
 - The `.gitignore` excludes sensitive files by default
 

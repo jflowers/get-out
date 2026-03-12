@@ -8,7 +8,7 @@ This document defines the complete command schema for all new and modified comma
 
 ---
 
-## Global Flags (unchanged, documented for reference)
+## Global Flags
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -16,6 +16,9 @@ This document defines the complete command schema for all new and modified comma
 | `--chrome-port` | int | `9222` | Chrome DevTools Protocol port |
 | `--verbose` / `-v` | bool | `false` | Verbose output |
 | `--debug` | bool | `false` | Enable debug output |
+| `--no-keyring` | bool | `false` | Disable OS keychain; store secrets in plaintext files (0600) |
+
+`--no-keyring` is a persistent flag (applies to all sub-commands). Intended for headless/CI environments where no OS keychain daemon is available. When set, `pkg/secrets.NewStore()` skips the probe and returns `FileStore` unconditionally.
 
 ---
 
@@ -36,7 +39,11 @@ This document defines the complete command schema for all new and modified comma
 3. Write `~/.get-out/conversations.json` template if absent
 4. Write `~/.get-out/settings.json` template if absent
 5. If not `--non-interactive` AND `settings.folder_id == ""` → show huh prompt; on accept, write `folder_id` to `settings.json`
-6. Print "Next Steps" box
+6. Call `secrets.Migrate(store, configDir, interactive, verbose, promptFn)`:
+   - `token.json` on disk → migrate to store → delete file
+   - `credentials.json` on disk → migrate to store → if interactive: confirm before delete; if non-interactive: print notice
+   - Idempotent; safe to re-run
+7. Print "Next Steps" box
 
 ### Output
 
@@ -61,6 +68,9 @@ This document defines the complete command schema for all new and modified comma
 | Writes `settings.json` | File absent |
 | Writes `folder_id` into `settings.json` | Prompt answered with valid ID |
 | Copies managed files from old dir | Old dir exists, files absent in new dir |
+| Migrates `token.json` to keychain → deletes file | `token.json` on disk + keychain active |
+| Migrates `credentials.json` to keychain | `credentials.json` on disk + keychain active |
+| Deletes `credentials.json` after migration | Interactive mode + user accepted prompt |
 
 ---
 
@@ -91,15 +101,17 @@ No additional flags beyond globals.
 
 | Check | Failure behaviour |
 |-------|------------------|
-| `credentials.json` exists at resolved path | Exit 1 with instructions (path to place file, Google Cloud Console URL) |
+| `store.Get(KeyClientCredentials)` succeeds | Exit 1 with instructions (path to place file, Google Cloud Console URL) |
+
+(`KeyClientCredentials` resolves to the keychain entry or `credentials.json` on disk depending on active backend.)
 
 ### Behaviour
 
-1. Load `credentials.json` from config dir (or `settings.google_credentials_file` if set)
+1. Load credentials via `store.Get(secrets.KeyClientCredentials)` (keychain or file)
 2. Start local OAuth callback server on `127.0.0.1:8085` with CSRF state token
 3. Print auth URL for user to open in browser
 4. Wait for callback (5-minute timeout)
-5. Exchange auth code for token; save to `token.json` (mode `0600`)
+5. Exchange auth code for token; save via `store.Set(secrets.KeyOAuthToken, ...)` (keychain or `token.json` at 0600)
 6. Verify by calling `drive.About.Get`; print connected Google account email
 
 ### Output
@@ -120,7 +132,8 @@ No additional flags beyond globals.
 
 | Effect | Condition |
 |--------|-----------|
-| Writes `token.json` (mode 0600) | OAuth flow succeeded |
+| Stores token via `store.Set(KeyOAuthToken, ...)` | OAuth flow succeeded |
+| Writes `token.json` (mode 0600) | OAuth flow succeeded AND `FileStore` active |
 
 ---
 
@@ -134,9 +147,9 @@ No additional flags beyond globals.
 
 ### Behaviour
 
-1. Check `credentials.json` present (no read/parse required — existence only)
-2. Check `token.json` present
-3. Attempt `gdrive.EnsureTokenFresh` (silent refresh if expired + refresh token present; save refreshed token)
+1. Check credentials present: `store.Get(KeyClientCredentials)` → success or ErrNotFound
+2. Check token present: `store.Get(KeyOAuthToken)` → success or ErrNotFound
+3. Attempt `gdrive.EnsureTokenFresh` (silent refresh if expired + refresh token present; save refreshed token via `store.Set`)
 4. Report `token.Valid()` result and expiry
 5. If token valid: call `drive.About.Get` to retrieve and print connected email
 
@@ -173,7 +186,7 @@ Token:         ✗ not found
 
 | Effect | Condition |
 |--------|-----------|
-| Overwrites `token.json` (mode 0600) | Token was expired and silent refresh succeeded |
+| Updates token via `store.Set(KeyOAuthToken, ...)` | Token was expired and silent refresh succeeded |
 
 ---
 
@@ -193,9 +206,9 @@ Token:         ✗ not found
 
 | # | Name | Pass condition | Warn condition | Fail condition | Fix message |
 |---|------|---------------|---------------|----------------|-------------|
-| 1 | Config dir | `~/.get-out/` exists, mode `0700` | exists but wrong perms | does not exist | `Run: get-out init` |
-| 2 | credentials.json | file exists | — | missing | instructions + Google Cloud Console URL |
-| 3 | token.json | file exists | — | missing | `Run: get-out auth login` |
+| 1 | Config dir | `~/.get-out/` exists, mode `0700` | exists but wrong perms | does not exist | `Run: get-out init`; also reports active secret backend (e.g., `"Secret storage: OS keychain"`) |
+| 2 | credentials | `store.Get(KeyClientCredentials)` succeeds | — | not found in store or file | instructions + Google Cloud Console URL |
+| 3 | token | `store.Get(KeyOAuthToken)` succeeds | — | not found in store or file | `Run: get-out auth login` |
 | 4 | Token valid | `token.Valid() == true` | expired but refresh token present (auto-refresh capable) | expired, no refresh token | `Run: get-out auth login` |
 | 5 | Drive API | `drive.About.Get` succeeds | — | error | print error message |
 | 6 | conversations.json | file present and parses, N≥1 conversations | file present but 0 conversations | missing or invalid JSON | edit file path |

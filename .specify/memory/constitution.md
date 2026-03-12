@@ -43,7 +43,7 @@ All data extraction MUST leverage an active browser session (via Zen/OpenCode en
 
 - NEVER hardcode `xoxc` tokens or session cookies in source code
 - Tokens MUST be read from active browser session or environment variables at runtime
-- No credentials SHALL be persisted to disk unless explicitly encrypted
+- No credentials SHALL be persisted to disk in a form accessible beyond the owning user. Acceptable persistence methods: (a) explicitly encrypted storage, or (b) plain-text files written with mode 0600 (owner read/write only) on user-owned local storage. `token.json` and `credentials.json` use method (b); this is the approved pattern for this CLI tool.
 
 ### VII. Output Format
 
