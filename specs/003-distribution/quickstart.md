@@ -242,3 +242,20 @@ Example using a custom config dir (e.g., for a second Slack workspace):
 ```bash
 get-out --config ~/.get-out-workspace2 export
 ```
+
+---
+
+## CI / Headless Environments
+
+When running get-out in a CI pipeline or any environment without an OS keychain daemon, use `--no-keyring` to bypass the keychain probe and store secrets as `0600` files unconditionally:
+
+```bash
+# Disable keychain; store secrets as 0600 files in ~/.get-out/
+get-out --no-keyring init --non-interactive
+get-out --no-keyring auth login
+get-out --no-keyring export
+```
+
+Pre-populate `~/.get-out/credentials.json` and `~/.get-out/token.json` (mode `0600`) before running. The `--no-keyring` flag skips the keychain availability probe entirely.
+
+> **Note**: `credentials.json` and `token.json` may be stored in the OS keychain instead of on disk (when keychain is available and `--no-keyring` is not set). Use `get-out auth status` to verify credential state.

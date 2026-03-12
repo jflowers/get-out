@@ -279,7 +279,7 @@ No additional flags beyond globals (`--chrome-port` controls which port is check
 | 5 | Validate Slack API | `slackapi.Client.ValidateAuth` | Workspace + username printed | — | Token rejected |
 
 **Skip logic**: If step N fails (`status == fail`), steps N+1 through 5 are reported as "  — Skipped (step N failed)" without executing.  
-**Step 3**: A warn (no Slack tab) does NOT skip step 4. Only a fail does.
+**Step 3**: A warn (no Slack tab found) also causes steps 4–5 to be skipped, because there is no tab to extract credentials from. The distinction from a fail is that `stepFailed` is not set by the warn itself — instead, the `slackTabFound == false` condition triggers the skip. After all steps complete, if `!slackTabFound`, `stepFailed` is set to `true` before the footer is rendered, so the exit code is 1 and the footer reports "Setup incomplete." A hard fail (e.g., CDP error) sets `stepFailed = true` immediately.
 
 ### Output
 
