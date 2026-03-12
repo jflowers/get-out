@@ -114,16 +114,16 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 **Config Directory**
 
 - **FR-001**: The default configuration directory MUST be `~/.get-out/` (resolved from the current user's home directory).
-- **FR-002**: All configuration files (`settings.json`, `conversations.json`, `people.json`, `credentials.json`, `token.json`) MUST be read from and written to the configured directory.
+- **FR-002**: Non-secret configuration files (`settings.json`, `conversations.json`, `people.json`) MUST be read from and written to the configured directory. Secret credentials (`credentials.json`, `token.json`) are stored in the OS credential store (keychain) when available; the configured directory is used as a fallback when the keychain is unavailable (see FR-036).
 - **FR-003**: The `--config` flag MUST continue to override the default directory for all commands, enabling development and multi-account use.
 - **FR-004**: `settings.json` MUST support a `folder_id` field that `export` reads as the default Google Drive destination when `--folder-id` is not specified on the command line.
 
 **`init` Command**
 
-- **FR-005**: `get-out init` MUST create `~/.get-out/` with mode 0700 if it does not exist. `credentials.json` and `token.json` MUST be written (or copied during migration) with mode 0600 (owner read/write only). All other files in the config directory use the process umask default.
+- **FR-005**: `get-out init` MUST create `~/.get-out/` with mode 0700 if it does not exist. When the keychain is unavailable (FileStore fallback), `credentials.json` and `token.json` MUST be written with mode 0600 (owner read/write only). When the keychain is available, secrets are stored there and no plaintext credential files are written. All other files use the process umask default.
 - **FR-006**: `get-out init` MUST write a minimal template `conversations.json` (`{"conversations":[]}`) if the file does not already exist in the target directory.
 - **FR-007**: `get-out init` MUST write a minimal template `settings.json` (`{}`) if the file does not already exist.
-- **FR-008**: `get-out init` MUST detect whether `~/.config/get-out/` exists and, if so, copy each managed file (`settings.json`, `conversations.json`, `people.json`, `credentials.json`, `token.json`) from the old directory to `~/.get-out/` only if that file does not already exist in `~/.get-out/`. A notice MUST be printed for each file copied. Files already present in `~/.get-out/` are never overwritten by migration.
+- **FR-008**: `get-out init` MUST detect whether `~/.config/get-out/` exists and, if so, copy each non-secret managed file (`settings.json`, `conversations.json`, `people.json`) from the old directory to `~/.get-out/` only if that file does not already exist in `~/.get-out/`. Secret files (`credentials.json`, `token.json`) found in the old directory MUST be migrated into the SecretStore (keychain or FileStore) via the same migration path as `get-out init` running on the new directory. A notice MUST be printed for each file copied or migrated. Files already present in `~/.get-out/` or already in the store are never overwritten.
 - **FR-009**: `get-out init` MUST NOT delete the old `~/.config/get-out/` directory; it MUST print a notice that the old directory can be removed manually.
 - **FR-010**: `get-out init` MUST interactively prompt for the Google Drive folder ID when `--non-interactive` is not set and no `folder_id` is present in `settings.json`. When `--non-interactive` is set and `folder_id` is absent, `init` MUST succeed silently and leave `folder_id` unset; in that case `export` will continue to require the `--folder-id` flag at runtime.
 - **FR-011**: The folder ID prompt MUST validate that the entered value matches the format of a Google Drive ID (28 or more alphanumeric, hyphen, or underscore characters) before accepting it.
@@ -132,21 +132,21 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 **`auth` Sub-Commands**
 
 - **FR-013**: `get-out auth` MUST be a command group; running it without a sub-command MUST print help.
-- **FR-014**: `get-out auth login` MUST perform the full Google OAuth 2.0 browser consent flow and save the resulting token to `token.json`.
-- **FR-015**: `get-out auth login` MUST exit with a clear, actionable error message if `credentials.json` is not present before attempting the OAuth flow.
-- **FR-016**: `get-out auth status` MUST report, without opening a browser: whether `credentials.json` is present, whether `token.json` is present, whether the token is valid and its expiry date, and the Google account email if the token is valid.
+- **FR-014**: `get-out auth login` MUST perform the full Google OAuth 2.0 browser consent flow and save the resulting token to the SecretStore (keychain preferred, FileStore fallback).
+- **FR-015**: `get-out auth login` MUST exit with a clear, actionable error message if client credentials are not present in the SecretStore (or, in FileStore mode, if `credentials.json` is not present on disk).
+- **FR-016**: `get-out auth status` MUST report, without opening a browser: whether client credentials are present (in store or on disk), whether an OAuth token is present, whether the token is valid and its expiry date, and the Google account email if the token is valid.
 - **FR-017**: `get-out auth status` MUST attempt a silent token refresh if the token is expired but a refresh token is present, save the refreshed token, and report the new expiry.
 - **FR-018**: `get-out auth status` MUST exit with a non-zero status code when the token is absent or cannot be refreshed.
 
 **`doctor` Command**
 
-- **FR-019**: `get-out doctor` MUST execute the following 10 checks in order and print a styled pass/warn/fail result for each: (1) config dir exists with correct permissions, (2) `credentials.json` present, (3) `token.json` present, (4) token valid or refreshable, (5) Google Drive API reachable — verified by making an authenticated `drive.About.Get` call (exercises both network and credential validity), (6) `conversations.json` present and parseable, (7) `people.json` present, (8) Chrome reachable on configured port, (9) Slack tab found in Chrome, (10) `export-index.json` present and readable.
+- **FR-019**: `get-out doctor` MUST execute the following 10 checks in order and print a styled pass/warn/fail result for each: (1) config dir exists with correct permissions, (2) client credentials present (keychain or disk), (3) OAuth token present (keychain or disk), (4) token valid or refreshable, (5) Google Drive API reachable — verified by making an authenticated `drive.About.Get` call (exercises both network and credential validity), (6) `conversations.json` present and parseable, (7) `people.json` present, (8) Chrome reachable on configured port, (9) Slack tab found in Chrome, (10) `export-index.json` present and readable. Check 1 MUST also report which SecretStore backend is active (e.g., "Secret storage: OS keychain" or "Secret storage: plaintext files"). Checks 2 and 3 report only pass/warn/fail — they do not repeat the backend name.
 - **FR-020**: Each failing check in `get-out doctor` MUST print a specific corrective action (e.g., command to run or file to create).
 - **FR-021**: `get-out doctor` MUST print a summary line showing counts of passed, warned, and failed checks.
 - **FR-021a**: `get-out doctor` MUST exit with code 0 when all checks pass or produce warnings only; it MUST exit with code 1 when one or more checks fail. This enables scripting patterns such as `get-out doctor && get-out export`.
 - **FR-022**: When `~/.config/get-out/` still exists alongside `~/.get-out/`, `get-out doctor` MUST display a warning suggesting the old directory can be deleted.
 - **FR-023**: `get-out doctor --verbose` MUST show the resolved file path for each checked resource inline on its check row.
-- **FR-023a**: `get-out doctor` MUST warn if `credentials.json` or `token.json` exist with file permissions broader than `0600` (e.g., group- or world-readable), and MUST suggest `chmod 0600 <path>` as the corrective action.
+- **FR-023a**: When the FileStore backend is active, `get-out doctor` MUST warn if `credentials.json` or `token.json` exist with file permissions broader than `0600` (e.g., group- or world-readable), and MUST suggest `chmod 0600 <path>` as the corrective action. When the KeychainStore backend is active, this check is skipped (keychain provides OS-level access control).
 
 **`setup-browser` Command**
 
@@ -155,6 +155,12 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 - **FR-026**: If any step fails, all subsequent steps MUST be skipped and reported as "Skipped".
 - **FR-027**: `get-out setup-browser` MUST display Chrome launch instructions appropriate to the user's operating system when step 1 fails.
 - **FR-028**: Slack credentials displayed by `get-out setup-browser` MUST be masked (first 15 characters + "..." + last 4 characters) to prevent accidental exposure.
+
+**Secret Storage**
+
+- **FR-036**: get-out MUST use a `SecretStore` abstraction (interface with `Get`, `Set`, `Delete` methods) with two backends: `KeychainStore` (OS credential store via `go-keyring`, service name `com.jflowers.get-out`) preferred, and `FileStore` (mode-0600 plaintext files in `~/.get-out/`) as fallback. The active backend MUST be selected at startup by probing keychain availability (write/read/delete cycle on a sentinel key); if the probe fails, FileStore is used silently. Both `token.json` (key: `oauth-token`) and `credentials.json` (key: `credentials-json`) MUST be stored via this abstraction.
+- **FR-037**: A `--no-keyring` global flag MUST be available on `rootCmd`. When set, the FileStore backend MUST be used unconditionally (bypassing the keychain probe). This enables headless/CI environments and scripting.
+- **FR-038**: `get-out init` MUST include a migration step: after setting up the config directory, it MUST call the migration function to move any existing plaintext `credentials.json` and `token.json` from `~/.get-out/` into the SecretStore. Migration is idempotent. For `token.json`, deletion from disk is automatic once the token is confirmed in the store. For `credentials.json`, when running in interactive mode the tool MUST present a `huh.NewConfirm()` prompt ("Delete credentials.json from disk?") before removing the file; when `--non-interactive` is set, the file is left on disk and the tool MUST print: "credentials.json retained on disk — run `get-out init` interactively to remove it."
 
 **Distribution**
 
@@ -172,8 +178,9 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 - **Settings** (`settings.json`): Key–value store for non-secret application preferences, including the default Google Drive folder ID. Optional; defaults applied when absent or when fields are missing.
 - **Conversations Config** (`conversations.json`): Ordered list of Slack conversations to export, each with an ID, name, type, mode, and export flag. Required for `list` and `export` commands.
 - **People Config** (`people.json`): Optional mapping of Slack user IDs to display names and Google emails. Created by `get-out discover`.
-- **OAuth Credentials** (`credentials.json`): Google Cloud OAuth 2.0 client credentials. Must be obtained manually from Google Cloud Console and placed in the config directory.
-- **OAuth Token** (`token.json`): Access and refresh tokens obtained via `get-out auth login`. Managed entirely by the tool.
+- **OAuth Credentials** (`credentials.json` / keychain key `credentials-json`): Google Cloud OAuth 2.0 client credentials. Must be obtained manually from Google Cloud Console. Stored in the OS keychain when available; falls back to `~/.get-out/credentials.json` (mode 0600) when keychain is unavailable or `--no-keyring` is set.
+- **OAuth Token** (`token.json` / keychain key `oauth-token`): Access and refresh tokens obtained via `get-out auth login`. Stored in the OS keychain when available; falls back to `~/.get-out/token.json` (mode 0600). Managed entirely by the tool.
+- **SecretStore**: The credential storage abstraction (`pkg/secrets`). Backend is `KeychainStore` (OS keychain via `go-keyring`, service name `com.jflowers.get-out`) by default, `FileStore` as fallback. Selected at startup via keychain probe or `--no-keyring` flag.
 - **Export Index** (`export-index.json`): Checkpoint file tracking export progress and linking Slack conversations to Google Drive documents. Written and read by `get-out export` and `get-out status`.
 - **Homebrew Tap** (`jflowers/homebrew-tools`): Public GitHub repository hosting Homebrew cask definitions for jflowers tools. Updated automatically by the release pipeline.
 
@@ -198,6 +205,9 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 - Q: What constitutes "Google Drive API reachable" in `doctor` check #5? → A: An authenticated `drive.About.Get` call — exercises both network and credential validity.
 - Q: What file permissions should sensitive credential files have? → A: `credentials.json` and `token.json` written with mode 0600; other files use process umask default.
 - Q: When `~/.get-out/` is non-empty and the old dir also has files, how should migration proceed? → A: Copy only files not already present in `~/.get-out/`; never overwrite existing files.
+- Q: Should `credentials.json` be included in the OS keychain store alongside `token.json`, matching the gcal-organizer pattern? → A: Yes — both `token.json` (auto-deleted from disk after keychain migration) and `credentials.json` (deleted only after interactive user confirmation) are stored in the OS keychain via a `SecretStore` abstraction with `KeychainStore`/`FileStore` backends. A `--no-keyring` flag bypasses the keychain for headless environments.
+- Q: How should `get-out init` handle the `credentials.json` deletion prompt when `--non-interactive` is set? → A: Use `huh.NewConfirm()` in interactive mode; when `--non-interactive`, skip the deletion prompt, leave `credentials.json` on disk, and print "credentials.json retained on disk — run `get-out init` interactively to remove it."
+- Q: What should `get-out doctor` display for a secret found in the keychain (not on disk)? → A: A plain pass line with no backend annotation (e.g., `✓ Client credentials found`). The active backend (keychain or file) is reported once in check 1 (config dir check), not repeated on each credential check.
 
 ## Assumptions
 
@@ -208,4 +218,5 @@ A user needs to connect get-out to their running Chrome browser so it can extrac
 - No man page exists yet; it will be hand-authored as part of this feature. Content covers all commands present after this spec is implemented.
 - The existing `test` command and its test file are removed as part of this feature; `safePreview` is moved to a shared helpers file so existing unit tests continue to compile.
 - Interactive prompts in `init` use `charmbracelet/huh`; styled output in `doctor` and `setup-browser` uses `charmbracelet/lipgloss` — the same Charm stack used in gcal-organizer.
+- The `go-keyring` library (`github.com/zalando/go-keyring`) is used for OS keychain access, matching the gcal-organizer dependency. On macOS it uses the system Keychain; on Linux it uses Secret Service (e.g., GNOME Keyring). The `pkg/secrets` package mirrors the gcal-organizer `internal/secrets` structure.
 - `get-out install` (background service installation) is out of scope for this spec. get-out is an on-demand CLI tool, not a daemon; launchd/systemd integration adds complexity without clear user value at this stage.

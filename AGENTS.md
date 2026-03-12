@@ -3,8 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-03-11
 
 ## Active Technologies
-- Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2
-- JSON files in `~/.get-out/` (config, token, export index) — no database
+- Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2, github.com/zalando/go-keyring v0.2.6 (OS keychain)
+- JSON files in `~/.get-out/` (config, token, export index) — no database; secrets optionally stored in OS keychain
 
 ## Project Structure
 
@@ -27,6 +27,7 @@ get-out/
 │   ├── exporter/             # Export orchestration and indexing
 │   ├── parser/               # Slack mrkdwn conversion
 │   ├── config/               # Configuration loading
+│   ├── secrets/              # SecretStore interface + KeychainStore/FileStore backends
 │   └── models/               # Shared domain types (ConversationType, ExportMode)
 ├── config/                   # Configuration files (gitignored except examples)
 │   ├── settings.json         # Application settings (credentials paths, folder ID, etc.)

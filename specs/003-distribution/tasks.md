@@ -142,8 +142,8 @@
   - File permission check for credentials.json / token.json: warn if mode broader than 0600
 
 - [ ] T022 [P] [US3] Implement checks 4–5 in `runDoctor` in `internal/cli/selfservice.go`:
-  - Check 4 (token valid): load token via `gdrive.LoadToken(cfg)`; if expired + refresh token present → warn (auto-refresh capable); if expired + no refresh → fail
-  - Check 5 (Drive API): create gdrive client, call `drive.About.Get`; fail with error message if unsuccessful; skip if check 4 failed
+  - Check 4 (token valid): load token via `loadTokenForDoctor(gdrive.DefaultConfig(dir).TokenPath)`; call `token.Valid()` — if valid → pass; if expired + `RefreshToken != ""` → warn (auto-refresh capable); if expired + no refresh token → fail
+  - Check 5 (Drive API): call `gdrive.Authenticate` + `gdrive.NewClient` + `drive.About.Get`; fail with error message if unsuccessful; skip if check 4 failed
 
 - [ ] T023 [P] [US3] Implement checks 6–7 in `runDoctor` in `internal/cli/selfservice.go`:
   - Check 6 (conversations.json): `config.LoadConversations(path)` — fail if missing/invalid JSON; warn if 0 conversations
@@ -155,6 +155,22 @@
   - Check 10 (export-index.json): `exporter.LoadExportIndex(path)` — warn if absent (first run); fail if present but corrupt JSON
 
 - [ ] T025 [US3] Wire `--verbose` flag to `runDoctor`: when `verbose` global flag is true, append resolved file path to each check row output in `internal/cli/selfservice.go`
+
+- [x] T036 [US3] Add unit tests for `doctor` check helper functions in `internal/cli/selfservice_test.go`:
+  - `TestOAuthToken_Valid`: valid token (future expiry + non-empty access token), expired token (past expiry), within 10s buffer, empty access token, zero expiry
+  - `TestLoadTokenForDoctor`: valid JSON file in temp dir, missing file returns error, corrupt JSON returns error
+  - `TestCheckConfigDir`: absent dir → failCount=1; path is a file → failCount=1; valid dir mode 0700 → passCount=1; dir mode 0755 → passCount=1 AND warnCount=1
+  - `TestCheckFile`: absent+mustExist → failCount=1; absent+mustWarn → warnCount=1; present regular file → passCount=1; present sensitive file mode 0644 → passCount=1 AND warnCount=1; present sensitive file mode 0600 → passCount=1 only
+  - `TestCheckTokenValidity`: valid token JSON → passCount=1, returns true; expired+refresh token → warnCount=1, returns true; expired+no refresh → failCount=1, returns false; corrupt file → failCount=1, returns false
+  - `TestCheckConversations`: absent file → failCount=1; corrupt JSON → failCount=1; empty conversations → warnCount=1; valid conversations → passCount=1
+  - `TestCheckPeople`: absent file → warnCount=1; present file → passCount=1
+  - `TestCheckExportIndex`: absent file → warnCount=1; corrupt JSON → failCount=1; valid index → passCount=1
+
+- [x] T037 [US3/US5] Extract `chromeLaunchCmd(goos string, port int) string` from inline OS branches in `checkChrome` and `runSetupBrowser` in `internal/cli/selfservice.go`; add `TestChromeLaunchCmd` in `internal/cli/selfservice_test.go`:
+  - goos="darwin" → string contains `open -a "Google Chrome"` and `--remote-debugging-port=9222`
+  - goos="linux" → string contains `google-chrome` and `--remote-debugging-port=9222`
+  - goos="windows" → falls through to else branch, string contains `google-chrome`
+  - Replace both inline `if runtime.GOOS == "darwin"` branches with `chromeLaunchCmd(runtime.GOOS, port)`
 
 **Checkpoint**: `get-out doctor` with a fully configured environment prints 10 green ✓ rows and "10/10 passed", exits 0. With a missing token it prints ✗ on check 3 and exits 1. `go test -race -count=1 ./...` passes.
 
@@ -196,8 +212,8 @@
   - Declare `stepFailed bool` sentinel
   - Step 1: HTTP GET `http://127.0.0.1:<chromePort>/json/version` with 3s timeout; on failure set `stepFailed = true`; print OS-appropriate launch command (`runtime.GOOS == "darwin"` → `open -a "Google Chrome" --args --remote-debugging-port=<port>`; else → `google-chrome --remote-debugging-port=<port>`)
   - Step 2: if `stepFailed` → print Skipped; else `chrome.NewSession(ctx, chromePort).ListTargets()`, print tab count
-  - Step 3: if `stepFailed` → print Skipped; else filter targets with `chrome.IsSlackURL`; if 0 tabs → `warn(...)` but do NOT set `stepFailed`; if target found → print URL
-  - Step 4: if `stepFailed` → print Skipped; else `chrome.ExtractCredentials(ctx, session)`; on failure set `stepFailed = true`; on success print `safePreview(token)` (from `helpers.go`)
+  - Step 3: if `stepFailed` → print Skipped; else filter targets with `chrome.IsSlackURL`; if 0 tabs → `warn(...)` but do NOT set `stepFailed`; set `slackTabFound = true` only when ≥1 tab found; if target found → print URL
+  - Step 4: if `stepFailed || !slackTabFound` → print Skipped; else `chrome.ExtractCredentials(ctx, session)`; on failure set `stepFailed = true`; on success print `safePreview(token)` (from `helpers.go`)
   - Step 5: if `stepFailed` → print Skipped; else `slackapi.NewBrowserClient(token, cookie, "").ValidateAuth(ctx)`; print workspace + username on success
   - Print footer: "Setup complete. Run: get-out export" if all passed; else instructions
   - `if stepFailed { os.Exit(1) }`
@@ -223,6 +239,7 @@
   - Add `charmbracelet/huh`, `charmbracelet/lipgloss` to Active Technologies
   - Update test command if needed
 - [ ] T032 [P] Update `internal/cli/root.go` `Long` help text: replace Quick Start example `get-out auth` with `get-out init` + `get-out auth login`; remove `test` reference
+- [x] T038 [P] Add Testing Strategy section to `specs/003-distribution/plan.md` documenting test tiers, unit-testable functions table, documented exclusions table, coverage floor (≥60% for new `internal/cli` code), and CI matrix
 - [ ] T033 Run `go build ./...` and `go test -race -count=1 ./...` — all must pass
 - [ ] T034 Manual validation against `specs/003-distribution/quickstart.md`:
   - Run `get-out init` on a clean `~/.get-out/` (or temp dir via `--config`)
@@ -231,6 +248,105 @@
   - Run `get-out setup-browser` with Chrome running + Slack tab
   - Verify `get-out auth login` still works
 - [ ] T035 Commit all changes and push branch `003-distribution`; open PR to `main`
+
+---
+
+## Phase 9: SecretStore — OS Keychain Integration (FR-036/037/038)
+
+**Purpose**: Add `pkg/secrets` with `SecretStore` interface, `KeychainStore` (go-keyring), and `FileStore` (0600-file fallback). Refactor `pkg/gdrive/auth.go` to use the store. Wire `--no-keyring` flag and migration into `runInit`.
+
+**⚠️ Dependency**: Phase 8 (Polish) should complete before merging Phase 9, but Phase 9 can be developed in parallel.
+
+### Sub-phase 9a: Dependency + Package Scaffold
+
+- [ ] T039 Add `github.com/zalando/go-keyring v0.2.6` to `go.mod`: `go get github.com/zalando/go-keyring@v0.2.6 && go mod tidy`
+
+- [ ] T040 [P] Create `pkg/secrets/store.go` — package declaration, constants, interface, Backend type, NewStore():
+  ```go
+  const ServiceName = "com.jflowers.get-out"
+  const (
+      KeyOAuthToken        = "oauth-token"
+      KeyClientCredentials = "credentials-json"
+  )
+  const probeKey = "__get_out_probe__"
+  var ErrNotFound = errors.New("secret not found")
+  type Backend int
+  const (BackendKeychain Backend = iota; BackendFile)
+  func (b Backend) String() string
+  type SecretStore interface { Get(key string) (string, error); Set(key, value string) error; Delete(key string) error }
+  // NewStore probes keychain unless noKeyring=true; falls back to FileStore silently
+  func NewStore(noKeyring bool, configDir string) (SecretStore, Backend)
+  ```
+  - Probe: write `__get_out_probe__` → read → delete; any error → FileStore fallback
+  - No logging dependency (get-out has no logging package); use `fmt.Fprintf(os.Stderr, ...)` only in debug mode (omit for now — probe failures are silent)
+
+- [ ] T041 [P] Create `pkg/secrets/keychain.go` — `KeychainStore` struct implementing `SecretStore` via `github.com/zalando/go-keyring`; map `keyring.ErrNotFound` to `secrets.ErrNotFound`
+
+- [ ] T042 [P] Create `pkg/secrets/file.go` — `FileStore` struct implementing `SecretStore`:
+  - `Get(KeyOAuthToken)` → read `token.json`; `Get(KeyClientCredentials)` → read `credentials.json`; unknown key → error
+  - `Set(KeyOAuthToken, v)` → write `token.json` (0600); `Set(KeyClientCredentials, v)` → write `credentials.json` (0600)
+  - `Delete(KeyOAuthToken)` → remove `token.json`; `Delete(KeyClientCredentials)` → remove `credentials.json`
+  - No `.env` file (get-out has no Gemini API key); file mapping is simpler than gcal-organizer
+
+- [ ] T043 [P] Create `pkg/secrets/migrate.go` — `Migrate(store SecretStore, configDir string, interactive bool, promptFn PromptFunc) error`:
+  - `PromptFunc func(message string) (bool, error)` — injectable for tests
+  - `migrateToken`: if not in store + on disk → store.Set → os.Remove(token.json)
+  - `migrateCredentials`: if not in store + on disk → store.Set → if interactive + promptFn != nil → confirm before os.Remove; else print notice
+  - Crash-recovery: if in store + on disk → re-attempt os.Remove (for both token and credentials with same interactive check)
+  - Idempotent: no-op if store already has the key and file is absent
+
+### Sub-phase 9b: Tests
+
+- [ ] T044 Create `pkg/secrets/store_test.go` — comprehensive unit tests (no real OS keychain; uses `keyring.MockInit()` / `keyring.MockInitWithError()`):
+  - `TestKeychainStore_SetGetDelete`: round-trip for both keys via MockInit
+  - `TestFileStore_SetGetDelete`: round-trip for both keys via t.TempDir()
+  - `TestFileStore_Permissions`: after Set, verify file mode is 0600
+  - `TestNewStore_NoKeyring`: `NewStore(true, dir)` → BackendFile
+  - `TestNewStore_KeychainAvailable`: `MockInit()` + `NewStore(false, dir)` → BackendKeychain
+  - `TestNewStore_KeychainUnavailable`: `MockInitWithError(ErrNotFound)` + `NewStore(false, dir)` → BackendFile
+  - `TestBackendString`: KeychainStore.String() + FileStore.String() + unknown
+  - `TestMigrate_TokenFromDisk`: token.json on disk → migrated to store → file deleted
+  - `TestMigrate_CredentialsNonInteractive`: credentials.json on disk → in store → file NOT deleted (no prompt)
+  - `TestMigrate_CredentialsInteractiveAccept`: promptFn returns true → file deleted
+  - `TestMigrate_CredentialsInteractiveDecline`: promptFn returns false → file preserved
+  - `TestMigrate_Idempotent`: run twice → no error, secrets still in store
+  - `TestMigrate_PartialState`: secret in store + file on disk → file cleaned up (crash recovery)
+  - `TestMigrate_NothingToMigrate`: empty dir → no error
+
+### Sub-phase 9c: Wire into CLI
+
+- [ ] T045 Update `internal/cli/root.go`:
+  - Add `var noKeyring bool` package-level var
+  - Add `var secretStore secrets.SecretStore` package-level var
+  - Add `var secretBackend secrets.Backend` package-level var
+  - In `init()`: `rootCmd.PersistentFlags().BoolVar(&noKeyring, "no-keyring", false, "Disable OS keychain; store secrets in plaintext files (0600)")`
+  - Add `PersistentPreRunE` to `rootCmd` that calls `secretStore, secretBackend = secrets.NewStore(noKeyring, configDir)`
+  - Import `github.com/jflowers/get-out/pkg/secrets`
+
+- [ ] T046 Refactor `pkg/gdrive/auth.go` to accept `SecretStore`:
+  - Add new function signatures that take `store secrets.SecretStore`:
+    - `AuthenticateWithStore(ctx, cfg *Config, store secrets.SecretStore) (*http.Client, error)`
+    - `EnsureTokenFreshWithStore(ctx, cfg *Config, store secrets.SecretStore) error`
+  - Internal helpers `loadTokenFromStore(store) (*oauth2.Token, error)` and `saveTokenToStore(store, token) error`
+  - `loadToken`/`saveToken` (file-based) remain for `doctor` helper `loadTokenForDoctor` — do NOT remove
+  - `HasCredentials(cfg)` and `HasToken(cfg)` remain for doctor checks that call `os.Stat` — they now check if the FileStore file exists; for KeychainStore these checks are handled via `store.Get`
+  - Keep `Config.CredentialsPath` and `Config.TokenPath` for backward compat with doctor
+  - Import `github.com/jflowers/get-out/pkg/secrets`
+
+- [ ] T047 Update `internal/cli/auth.go` to use `secretStore`:
+  - `runAuthLogin`: replace `gdrive.HasCredentials(cfg)` check with `secretStore.Get(secrets.KeyClientCredentials)` — fail if ErrNotFound; call `gdrive.AuthenticateWithStore(ctx, cfg, secretStore)` instead of `gdrive.Authenticate`
+  - `runAuthStatus`: replace `gdrive.HasCredentials(cfg)` / `gdrive.HasToken(cfg)` with `secretStore.Get(...)` calls; call `gdrive.EnsureTokenFreshWithStore(ctx, cfg, secretStore)` instead of `gdrive.EnsureTokenFresh`
+
+- [ ] T048 Update `internal/cli/selfservice.go`:
+  - `runInit` (step 6): after folder-ID prompt, call `secrets.Migrate(secretStore, configDir, !initNonInteractive, migratePrompt)`; define `migratePrompt` as a `huh.NewConfirm()` wrapper
+  - `runDoctor` check 1: after pass/warn/fail for config dir, append `fmt.Sprintf("(secret storage: %s)", secretBackend)` to the pass message
+  - `runDoctor` checks 2/3: replace `checkFile(...)` calls with `checkSecret("credentials", secrets.KeyClientCredentials, ...)` and `checkSecret("token", secrets.KeyOAuthToken, ...)` helper that calls `secretStore.Get(key)` — fail if ErrNotFound
+  - Add `checkSecret(name, key string, fixMsg string, passCount, warnCount, failCount *int) bool` helper
+
+### Sub-phase 9d: Validation
+
+- [ ] T049 Run `go build ./...` — must compile with no errors
+- [ ] T050 Run `go test -race -count=1 ./...` — all tests must pass; `pkg/secrets` package must achieve ≥80% coverage
 
 ---
 

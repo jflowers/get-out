@@ -140,6 +140,48 @@ err := huh.NewForm(
 
 ---
 
+## 11. SecretStore Abstraction and `go-keyring` Selection
+
+**Decision**: Introduce `pkg/secrets` with a `SecretStore` interface backed by either `KeychainStore` (OS keychain via `go-keyring`) or `FileStore` (plain files at 0600). Use `github.com/zalando/go-keyring v0.2.6`.
+
+**Rationale**: `token.json` and `credentials.json` contain long-lived OAuth secrets that should not sit in plaintext at `0644` in the user's home directory. The OS keychain (macOS Keychain, Linux Secret Service) provides encrypted at-rest storage with access control enforced by the OS — no application-level key management required. The `go-keyring` library is pure Go on macOS (uses the Security framework via CGO-free bindings) and Linux (uses Secret Service D-Bus API). It is already in use in the gcal-organizer reference project, ensuring consistency across the jflowers toolchain.
+
+**Library selection rationale** (alternatives considered):
+
+| Library | Verdict | Reason |
+|---------|---------|--------|
+| `github.com/zalando/go-keyring v0.2.6` | **Selected** | Minimal API (Get/Set/Delete); pure Go on macOS; active maintenance; used in gcal-organizer |
+| `github.com/keybase/go-keychain` | Rejected | macOS-only; requires CGO; no Linux support |
+| `github.com/99designs/keyring` | Rejected | Heavier dependency (supports many backends we don't need); wraps go-keyring internally |
+
+**Service name**: `com.jflowers.get-out`
+
+**Well-known keys**:
+- `oauth-token` — stores the full contents of `token.json`
+- `credentials-json` — stores the full contents of `credentials.json`
+
+**Probe strategy**: On startup, `NewStore()` writes a sentinel value to key `__get_out_probe__`, reads it back, then deletes it. If any step fails, the store silently falls back to `FileStore`. This handles headless/CI environments (no keychain daemon), sandboxed environments, and containers gracefully without printing an error to the user.
+
+**`--no-keyring` flag**: A global persistent flag on `rootCmd`. When set, `NewStore()` skips the probe entirely and returns `FileStore` unconditionally. Designed for CI pipelines and headless systems where the probe itself would be slow or noisy.
+
+**`FileStore` key-to-file mapping** (for get-out, no `.env` file needed — only two keys):
+- `oauth-token` → `token.json` (0600)
+- `credentials-json` → `credentials.json` (0600)
+
+**Migration** (`pkg/secrets/migrate.go`): Called from `runInit`. Idempotent — safe to run on every `init`. For `token.json`: read from disk → write to store → delete file. For `credentials.json`: read from disk → write to store → if `--non-interactive`: print notice ("credentials.json still on disk — delete manually when ready"); if interactive: prompt with `huh.NewConfirm()` → delete on acceptance. Crash-recovery: if secret is already in store AND file exists on disk, re-attempt file deletion (handles crash between store.Set and os.Remove).
+
+**Doctor check 1 update**: Reports `"Secret storage: OS keychain"` or `"Secret storage: plaintext files"` in the check 1 row output. This is always a pass (both backends are valid); the backend name is informational only.
+
+**`pkg/gdrive/auth.go` refactor**: `Authenticate()` and `EnsureTokenFresh()` are refactored to accept `secrets.SecretStore` instead of reading/writing files directly. `loadToken` and `saveToken` become `store.Get(secrets.KeyOAuthToken)` and `store.Set(secrets.KeyOAuthToken, ...)`. Credential bytes come from `store.Get(secrets.KeyClientCredentials)`. The `Config` struct no longer needs `CredentialsPath` or `TokenPath` for the primary flow — those fields are retained for backward compatibility with `doctor` check logic that calls `os.Stat` directly.
+
+**Test strategy for `pkg/secrets`**:
+- `KeychainStore` tests: use `keyring.MockInit()` and `keyring.MockInitWithError()` — no real OS keychain required; safe in CI
+- `FileStore` tests: use `t.TempDir()` — no real filesystem paths
+- `Migrate` tests: use `keyring.MockInit()` + `t.TempDir()`; inject `PromptFunc` to avoid interactive prompts
+- `NewStore` probe test: `keyring.MockInitWithError()` forces FileStore fallback; `keyring.MockInit()` forces KeychainStore success
+
+---
+
 ## 10. `setup-browser` Step-Skip Logic
 
 **Decision**: If any step fails, all subsequent steps are reported as "Skipped (previous step failed)" and no further network calls are made.
