@@ -187,8 +187,8 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Expiry:      %s\n", token.Expiry.Local().Format("2006-01-02 15:04:05 MST"))
 	}
 
-	// Check 4: Drive API call to get email
-	httpClient, err := gdrive.AuthenticateWithStore(ctx, cfg, secretStore)
+	// Check 4: Drive API call to get email (use ClientFromStore — no browser flow)
+	httpClient, err := gdrive.ClientFromStore(ctx, cfg, secretStore)
 	if err != nil {
 		fmt.Println("Drive API:   ✗ could not authenticate")
 		return fmt.Errorf("drive authentication failed: %w", err)

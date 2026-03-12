@@ -64,15 +64,12 @@ func NewStore(noKeyring bool, configDir string) (SecretStore, Backend) {
 		return &FileStore{ConfigDir: configDir}, BackendFile
 	}
 
-	// Probe keychain availability with a write/read/delete cycle.
-	if err := keyring.Set(ServiceName, probeKey, "probe"); err != nil {
-		return &FileStore{ConfigDir: configDir}, BackendFile
+	// Probe keychain availability with a lightweight read-only check.
+	// ErrNotFound means the keychain is reachable (key simply doesn't exist yet).
+	// Any other error (locked keychain, missing daemon, etc.) means fall back to FileStore.
+	_, err := keyring.Get(ServiceName, probeKey)
+	if err == nil || err == keyring.ErrNotFound {
+		return &KeychainStore{}, BackendKeychain
 	}
-	if _, err := keyring.Get(ServiceName, probeKey); err != nil {
-		_ = keyring.Delete(ServiceName, probeKey) // best-effort cleanup
-		return &FileStore{ConfigDir: configDir}, BackendFile
-	}
-	_ = keyring.Delete(ServiceName, probeKey) // best-effort cleanup
-
-	return &KeychainStore{}, BackendKeychain
+	return &FileStore{ConfigDir: configDir}, BackendFile
 }

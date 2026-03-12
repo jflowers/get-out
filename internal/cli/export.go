@@ -15,6 +15,7 @@ import (
 	"github.com/jflowers/get-out/pkg/exporter"
 	"github.com/jflowers/get-out/pkg/gdrive"
 	"github.com/jflowers/get-out/pkg/models"
+	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -198,20 +199,18 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check prerequisites
+	// Check prerequisites via SecretStore (handles both keychain and file backends).
 	gdriveCfg := gdrive.DefaultConfig(configDir)
 	if settings.GoogleCredentialsFile != "" {
 		gdriveCfg.CredentialsPath = settings.GoogleCredentialsFile
-		// Derive token path from the same directory as credentials
 		gdriveCfg.TokenPath = filepath.Join(filepath.Dir(settings.GoogleCredentialsFile), "token.json")
 	}
-	if !gdrive.HasCredentials(gdriveCfg) {
-		return fmt.Errorf("Google credentials not found at %s\n\nDownload credentials.json from Google Cloud Console", gdriveCfg.CredentialsPath)
+	if _, err := secretStore.Get(secrets.KeyClientCredentials); err != nil {
+		return fmt.Errorf("Google credentials not found — run: get-out init\n\nDownload credentials.json from Google Cloud Console")
 	}
-
-	if !gdrive.HasToken(gdriveCfg) {
-		fmt.Println("Google authorization required. Run 'get-out auth' first.")
-		return fmt.Errorf("no Google token found at %s", gdriveCfg.TokenPath)
+	if _, err := secretStore.Get(secrets.KeyOAuthToken); err != nil {
+		fmt.Println("Google authorization required. Run 'get-out auth login' first.")
+		return fmt.Errorf("no Google token found — run: get-out auth login")
 	}
 
 	// Create context with cancellation
@@ -277,9 +276,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		},
 	})
 
-	// Initialize connections
+	// Initialize connections using the active SecretStore (keychain or file).
 	fmt.Println("Initializing...")
-	if err := exp.Initialize(ctx, chromePort); err != nil {
+	if err := exp.InitializeWithStore(ctx, chromePort, secretStore); err != nil {
 		return fmt.Errorf("initialization failed: %w", err)
 	}
 	fmt.Println()

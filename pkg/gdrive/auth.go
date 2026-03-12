@@ -251,6 +251,30 @@ func saveTokenToStore(store secrets.SecretStore, token *oauth2.Token) error {
 	return store.Set(secrets.KeyOAuthToken, string(data))
 }
 
+// ClientFromStore builds an authenticated HTTP client from a token already in
+// the store plus credentials from the store. Unlike AuthenticateWithStore, this
+// function never initiates a browser OAuth flow — it fails if no valid token
+// exists. Use this for read-only status checks after EnsureTokenFreshWithStore
+// has already been called.
+func ClientFromStore(ctx context.Context, cfg *Config, store secrets.SecretStore) (*http.Client, error) {
+	credData, err := store.Get(secrets.KeyClientCredentials)
+	if err != nil {
+		return nil, fmt.Errorf("credentials not found in store: %w", err)
+	}
+	oauthConfig, err := google.ConfigFromJSON([]byte(credData), Scopes...)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse credentials: %w", err)
+	}
+	token, err := loadTokenFromStore(store)
+	if err != nil {
+		return nil, fmt.Errorf("token not found in store: %w", err)
+	}
+	if !token.Valid() && token.RefreshToken == "" {
+		return nil, fmt.Errorf("token is expired and has no refresh token; run 'get-out auth login'")
+	}
+	return oauthConfig.Client(ctx, token), nil
+}
+
 // AuthenticateWithStore performs the OAuth 2.0 flow using a SecretStore for
 // credential and token I/O. This is the preferred function for CLI commands.
 // If a saved token exists and is valid (or has a refresh token), it is reused.
