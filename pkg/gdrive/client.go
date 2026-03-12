@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jflowers/get-out/pkg/secrets"
 	"google.golang.org/api/docs/v1"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
@@ -37,6 +38,17 @@ func NewClient(ctx context.Context, httpClient *http.Client) (*Client, error) {
 // NewClientFromConfig creates a client by authenticating with the given config.
 func NewClientFromConfig(ctx context.Context, cfg *Config) (*Client, error) {
 	httpClient, err := Authenticate(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewClient(ctx, httpClient)
+}
+
+// NewClientFromStore creates a client using a SecretStore for credential and
+// token I/O. This is the preferred function when the SecretStore is available.
+func NewClientFromStore(ctx context.Context, cfg *Config, store secrets.SecretStore) (*Client, error) {
+	httpClient, err := AuthenticateWithStore(ctx, cfg, store)
 	if err != nil {
 		return nil, err
 	}

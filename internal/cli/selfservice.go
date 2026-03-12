@@ -22,6 +22,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// driveIDPattern is compiled once at package init to avoid per-call allocations.
+var driveIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // ---------------------------------------------------------------------------
 // T009: Shared lipgloss style constants
 // ---------------------------------------------------------------------------
@@ -158,26 +161,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 6: Migrate secrets to SecretStore (idempotent; safe to call every init).
-	if secretStore != nil {
-		interactive := !initNonInteractive
-		migratePromptFn := secrets.PromptFunc(func(message string) (bool, error) {
-			var confirm bool
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewConfirm().
-						Title(message).
-						Value(&confirm),
-				),
-			)
-			if err := form.Run(); err != nil {
-				return false, err
-			}
-			return confirm, nil
-		})
-		if err := secrets.Migrate(secretStore, configDir, interactive, migratePromptFn); err != nil {
-			// Non-fatal: log but don't fail init
-			fmt.Printf("Warning: secret migration incomplete: %v\n", err)
+	interactive := !initNonInteractive
+	migratePromptFn := secrets.PromptFunc(func(message string) (bool, error) {
+		var confirm bool
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title(message).
+					Value(&confirm),
+			),
+		)
+		if err := form.Run(); err != nil {
+			return false, err
 		}
+		return confirm, nil
+	})
+	if err := secrets.Migrate(secretStore, configDir, interactive, migratePromptFn); err != nil {
+		// Non-fatal: log but don't fail init
+		fmt.Printf("Warning: secret migration incomplete: %v\n", err)
 	}
 
 	// Step 7: Print next steps.
@@ -185,10 +186,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	nextSteps := `Next Steps:
   1. Copy credentials.json to ~/.get-out/
      (Download from: https://console.cloud.google.com/apis/credentials)
-  2. Run: get-out init  (to migrate credentials to keychain)
-  3. Run: get-out auth login
-  4. Run: get-out setup-browser
-  5. Run: get-out export`
+  2. Run: get-out auth login
+  3. Run: get-out setup-browser
+  4. Run: get-out export`
 	fmt.Println(boxStyle.Render(nextSteps))
 
 	return nil
@@ -201,14 +201,11 @@ func migrateFiles(oldDir, newDir string) error {
 		dstPath := filepath.Join(newDir, filename)
 
 		// Skip if source doesn't exist.
-		srcInfo, err := os.Stat(srcPath)
-		if os.IsNotExist(err) {
+		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
 			continue
-		}
-		if err != nil {
+		} else if err != nil {
 			return fmt.Errorf("failed to stat %s: %w", srcPath, err)
 		}
-		_ = srcInfo
 
 		// Skip if destination already exists.
 		if _, err := os.Stat(dstPath); err == nil {
@@ -239,7 +236,7 @@ func validateDriveID(id string) error {
 	if len(id) < 28 {
 		return fmt.Errorf("ID too short (must be at least 28 characters)")
 	}
-	if !regexp.MustCompile(`^[a-zA-Z0-9_-]+$`).MatchString(id) {
+	if !driveIDPattern.MatchString(id) {
 		return fmt.Errorf("ID contains invalid characters (only alphanumeric, _, - allowed)")
 	}
 	return nil
@@ -381,7 +378,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println("─────────────────────────────────────────")
 
 	if failCount > 0 {
-		os.Exit(1)
+		return fmt.Errorf("doctor: %d check(s) failed", failCount)
 	}
 	return nil
 }
@@ -426,41 +423,6 @@ func checkSecret(name, key string, store secrets.SecretStore, fixMsg string, pas
 	return true
 }
 
-// checkFile checks whether a file exists (checks 2 and 3).
-// Returns true if the file is present.
-func checkFile(name, path string, mustExist bool, fixMsg string, pass_, warn_, fail_ *int) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		if mustExist {
-			fail(name + " not found")
-			hint(fixMsg)
-			*fail_++
-		} else {
-			warn(name + " not found")
-			hint(fixMsg)
-			*warn_++
-		}
-		return false
-	}
-	if err != nil {
-		fail(name + ": " + err.Error())
-		*fail_++
-		return false
-	}
-	pass(name + " exists")
-	if verbose {
-		fmt.Println(dimStyle.Render("    " + path))
-	}
-	*pass_++
-	// Check permissions on sensitive files.
-	if sensitiveFiles[name] && info.Mode().Perm()&0177 != 0 {
-		warn(name + " has permissions broader than 0600")
-		hint(fmt.Sprintf("Run: chmod 600 %s", path))
-		*warn_++
-	}
-	return true
-}
-
 // checkTokenValidity checks check 4. Returns whether a Drive API call can proceed.
 func checkTokenValidity(dir string, store secrets.SecretStore, pass_, warn_, fail_ *int) bool {
 	token, err := gdrive.LoadTokenFromStore(store)
@@ -488,31 +450,6 @@ func checkTokenValidity(dir string, store secrets.SecretStore, pass_, warn_, fai
 	hint("Run: get-out auth login")
 	*fail_++
 	return false
-}
-
-// loadTokenForDoctor reads a token from disk (thin wrapper around unexported gdrive.loadToken).
-func loadTokenForDoctor(path string) (*oauthToken, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var t oauthToken
-	if err := json.NewDecoder(f).Decode(&t); err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
-
-// oauthToken is a minimal representation of the saved OAuth2 token.
-type oauthToken struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-}
-
-func (t *oauthToken) Valid() bool {
-	return t.AccessToken != "" && time.Now().Before(t.Expiry.Add(-10*time.Second))
 }
 
 // checkDriveAPI checks check 5.
@@ -771,7 +708,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 				slackTabFound = true
 				msg := fmt.Sprintf("OK (%d tab(s))", found)
 				if verbose {
-					msg += "  " + slackURL
+					msg += "  " + truncateURL(slackURL)
 				}
 				fmt.Println(passStyle.Render(msg))
 			}
@@ -829,7 +766,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	fmt.Println("─────────────────────────────────────────")
 
 	if stepFailed {
-		os.Exit(1)
+		return fmt.Errorf("setup incomplete: one or more steps failed")
 	}
 	return nil
 }

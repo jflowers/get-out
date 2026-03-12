@@ -100,8 +100,7 @@ func migrateCredentials(store SecretStore, configDir string, interactive bool, p
 					}
 				}
 			} else if !interactive {
-				fmt.Println("  credentials.json is in the keychain — delete it manually when ready:")
-				fmt.Printf("    rm %s\n", credsPath)
+				fmt.Fprintln(os.Stderr, "credentials.json retained on disk — run `get-out init` interactively to remove it.")
 			}
 		}
 	}

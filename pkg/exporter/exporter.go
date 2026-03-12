@@ -11,6 +11,7 @@ import (
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/gdrive"
 	"github.com/jflowers/get-out/pkg/parser"
+	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/jflowers/get-out/pkg/slackapi"
 )
 
@@ -146,6 +147,62 @@ func (e *Exporter) Initialize(ctx context.Context, chromePort int) error {
 	e.loadPersonResolver()
 
 	// Create doc writer
+	e.docWriter = NewDocWriter(e.gdriveClient, e.slackClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL, e.index.LookupThreadURL)
+
+	return nil
+}
+
+// InitializeWithStore sets up connections to Chrome/Slack and Google Drive,
+// using a SecretStore for credential and token I/O. This is the preferred
+// function for CLI commands where a SecretStore has been initialized.
+func (e *Exporter) InitializeWithStore(ctx context.Context, chromePort int, store secrets.SecretStore) error {
+	e.Progress("Loading export index...")
+	indexPath := DefaultIndexPath(e.configDir)
+	index, err := LoadExportIndex(indexPath)
+	if err != nil {
+		return fmt.Errorf("failed to load export index: %w", err)
+	}
+	e.index = index
+
+	e.Progress("Authenticating with Google Drive...")
+	gdriveCfg := gdrive.DefaultConfig(e.configDir)
+	if e.googleCredentialsFile != "" {
+		gdriveCfg.CredentialsPath = e.googleCredentialsFile
+		gdriveCfg.TokenPath = filepath.Join(filepath.Dir(e.googleCredentialsFile), "token.json")
+	}
+	gdriveClient, err := gdrive.NewClientFromStore(ctx, gdriveCfg, store)
+	if err != nil {
+		return fmt.Errorf("failed to authenticate with Google: %w", err)
+	}
+	e.gdriveClient = gdriveClient
+
+	e.Progress("Connecting to Chrome (port %d)...", chromePort)
+	chromeCfg := &chrome.Config{
+		DebugPort: chromePort,
+		Timeout:   30 * time.Second,
+	}
+	session, err := chrome.Connect(ctx, chromeCfg)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Chrome: %w", err)
+	}
+	defer session.Close()
+
+	e.Progress("Extracting Slack credentials...")
+	creds, err := session.ExtractCredentials(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to extract Slack credentials: %w", err)
+	}
+	e.Progress("Found Slack team: %s", creds.TeamDomain)
+
+	e.slackClient = slackapi.NewBrowserClient(creds.Token, creds.Cookie)
+
+	e.folderStructure = NewFolderStructure(e.gdriveClient, e.index, &FolderStructureConfig{
+		RootFolderName: e.rootFolderName,
+		RootFolderID:   e.rootFolderID,
+	})
+
+	e.loadPersonResolver()
+
 	e.docWriter = NewDocWriter(e.gdriveClient, e.slackClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL, e.index.LookupThreadURL)
 
 	return nil
