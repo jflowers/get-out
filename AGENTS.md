@@ -5,6 +5,8 @@ Auto-generated from all feature plans. Last updated: 2026-03-11
 ## Active Technologies
 - Go 1.25.0 + Chromedp (CDP), cobra v1.10.2 (CLI), charmbracelet/huh (interactive prompts), charmbracelet/lipgloss (styled output), Google Drive API v3, Google Docs API v1, golang.org/x/oauth2, github.com/zalando/go-keyring v0.2.6 (OS keychain)
 - JSON files in `~/.get-out/` (config, token, export index) — no database; secrets optionally stored in OS keychain
+- Go 1.25 (existing; no change) + `github.com/unbound-force/gaze/cmd/gaze@latest` (external tool, installed via `go install`); `opencode-ai` npm package (external tool, installed via `npm install -g`) (004-gaze-ci-opencode)
+- N/A — no persistent storage; `coverage.out` is an ephemeral workspace file (004-gaze-ci-opencode)
 
 ## Project Structure
 
@@ -96,6 +98,7 @@ When making changes, always review and update:
 3. **Constitution** - Architectural decisions
 
 ## Recent Changes
+- 004-gaze-ci-opencode: Added Go 1.25 (existing; no change) + `github.com/unbound-force/gaze/cmd/gaze@latest` (external tool, installed via `go install`); `opencode-ai` npm package (external tool, installed via `npm install -g`)
 - 003-distribution: Added init, doctor, auth login/status, setup-browser commands; charmbracelet/huh + lipgloss; config dir moved to ~/.get-out/; macOS signing + Homebrew tap release pipeline
 - 001-slack-message-export: Core export functionality with browser mode; --folder-id flag
 
