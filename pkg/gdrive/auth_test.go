@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jflowers/get-out/pkg/secrets"
+	"golang.org/x/oauth2"
 )
 
 // ---------------------------------------------------------------------------
@@ -252,5 +254,174 @@ func TestClientFromStore_ExpiredNoRefresh(t *testing.T) {
 	_, err := ClientFromStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("ClientFromStore with expired token and no refresh: expected error, got nil")
+	}
+}
+
+// TestClientFromStore_ValidToken verifies the happy path: valid credentials +
+// valid token → returns a non-nil *http.Client without network access.
+func TestClientFromStore_ValidToken(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeCredentials(t, store)
+	writeToken(t, store, map[string]any{
+		"access_token": "ya29.valid",
+		"expiry":       time.Now().Add(time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	client, err := ClientFromStore(ctx, cfg, store)
+	if err != nil {
+		t.Fatalf("ClientFromStore with valid token: unexpected error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("ClientFromStore returned nil client")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// saveTokenToStore tests
+// ---------------------------------------------------------------------------
+
+// TestSaveTokenToStore_RoundTrip verifies that saveTokenToStore serialises a
+// token to the store and that LoadTokenFromStore can read it back correctly.
+func TestSaveTokenToStore_RoundTrip(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	tok := &oauth2.Token{
+		AccessToken:  "ya29.saved",
+		RefreshToken: "1//saved",
+		Expiry:       time.Now().Add(time.Hour).UTC().Truncate(time.Second),
+	}
+	if err := saveTokenToStore(store, tok); err != nil {
+		t.Fatalf("saveTokenToStore: %v", err)
+	}
+	got, err := LoadTokenFromStore(store)
+	if err != nil {
+		t.Fatalf("LoadTokenFromStore after saveTokenToStore: %v", err)
+	}
+	if got.AccessToken != tok.AccessToken {
+		t.Errorf("AccessToken = %q, want %q", got.AccessToken, tok.AccessToken)
+	}
+	if got.RefreshToken != tok.RefreshToken {
+		t.Errorf("RefreshToken = %q, want %q", got.RefreshToken, tok.RefreshToken)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// EnsureTokenFreshWithStore — refresh branch tests (no network required)
+// ---------------------------------------------------------------------------
+
+// TestEnsureTokenFreshWithStore_ExpiredWithRefreshMissingCredentials verifies
+// that the function returns an error about credentials when the token has a
+// refresh token but no credentials are in the store.
+func TestEnsureTokenFreshWithStore_ExpiredWithRefreshMissingCredentials(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	// Expired token WITH refresh token, but NO credentials in store.
+	writeToken(t, store, map[string]any{
+		"access_token":  "ya29.expired",
+		"refresh_token": "1//refresh",
+		"expiry":        time.Now().Add(-time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	err := EnsureTokenFreshWithStore(ctx, cfg, store)
+	if err == nil {
+		t.Fatal("expected error when credentials absent during refresh, got nil")
+	}
+	if !strings.Contains(err.Error(), "credentials") {
+		t.Errorf("error %q should mention credentials", err.Error())
+	}
+}
+
+// TestEnsureTokenFreshWithStore_ExpiredWithRefreshBadCredentials verifies
+// that the function returns an error when credentials JSON cannot be parsed.
+func TestEnsureTokenFreshWithStore_ExpiredWithRefreshBadCredentials(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeToken(t, store, map[string]any{
+		"access_token":  "ya29.expired",
+		"refresh_token": "1//refresh",
+		"expiry":        time.Now().Add(-time.Hour).Format(time.RFC3339),
+	})
+	// Write malformed credentials JSON.
+	if err := store.Set(secrets.KeyClientCredentials, "not-valid-json{{{"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{}
+	ctx := context.Background()
+
+	err := EnsureTokenFreshWithStore(ctx, cfg, store)
+	if err == nil {
+		t.Fatal("expected error with bad credentials JSON, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AuthenticateWithStore — additional branch tests
+// ---------------------------------------------------------------------------
+
+// TestAuthenticateWithStore_BadCredentialsJSON verifies that
+// AuthenticateWithStore returns an error when credentials JSON cannot be parsed.
+func TestAuthenticateWithStore_BadCredentialsJSON(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	if err := store.Set(secrets.KeyClientCredentials, "not-valid-json{{{"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{}
+	ctx := context.Background()
+
+	_, err := AuthenticateWithStore(ctx, cfg, store)
+	if err == nil {
+		t.Fatal("AuthenticateWithStore with bad credentials JSON: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse credentials") {
+		t.Errorf("error %q should mention 'parse credentials'", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Error message content assertions (regression lock-down)
+// ---------------------------------------------------------------------------
+
+// TestEnsureTokenFreshWithStore_MissingToken_ErrorMessage verifies that the
+// error message for a missing token contains the actionable "auth login" hint.
+func TestEnsureTokenFreshWithStore_MissingToken_ErrorMessage(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	cfg := &Config{}
+	ctx := context.Background()
+
+	err := EnsureTokenFreshWithStore(ctx, cfg, store)
+	if err == nil {
+		t.Fatal("expected error for missing token, got nil")
+	}
+	if !strings.Contains(err.Error(), "auth login") {
+		t.Errorf("error %q should contain 'auth login'", err.Error())
+	}
+}
+
+// TestEnsureTokenFreshWithStore_NoRefreshToken_ErrorMessage verifies that the
+// error message for an expired token with no refresh token contains the
+// actionable "auth login" hint.
+func TestEnsureTokenFreshWithStore_NoRefreshToken_ErrorMessage(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeToken(t, store, map[string]any{
+		"access_token": "ya29.expired",
+		"expiry":       time.Now().Add(-time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	err := EnsureTokenFreshWithStore(ctx, cfg, store)
+	if err == nil {
+		t.Fatal("expected error for expired token with no refresh, got nil")
+	}
+	if !strings.Contains(err.Error(), "auth login") {
+		t.Errorf("error %q should contain 'auth login'", err.Error())
 	}
 }

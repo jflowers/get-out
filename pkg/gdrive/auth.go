@@ -42,47 +42,6 @@ func DefaultConfig(configDir string) *Config {
 	}
 }
 
-// Authenticate performs the OAuth 2.0 flow and returns an authenticated HTTP client.
-// If a saved token exists and is valid, it will be reused.
-// Otherwise, a browser-based consent flow will be initiated.
-func Authenticate(ctx context.Context, cfg *Config) (*http.Client, error) {
-	// Read credentials
-	credBytes, err := os.ReadFile(cfg.CredentialsPath)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read credentials file %s: %w", cfg.CredentialsPath, err)
-	}
-
-	// Parse OAuth config
-	oauthConfig, err := google.ConfigFromJSON(credBytes, Scopes...)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse credentials: %w", err)
-	}
-
-	// Try to load existing token
-	token, err := loadToken(cfg.TokenPath)
-	if err == nil {
-		// If the token is valid OR has a refresh token, use it.
-		// oauthConfig.Client() handles auto-refresh transparently.
-		if token.Valid() || token.RefreshToken != "" {
-			return oauthConfig.Client(ctx, token), nil
-		}
-	}
-
-	// Need to get new token via browser flow
-	token, err = getTokenFromWeb(ctx, oauthConfig)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get token: %w", err)
-	}
-
-	// Save token for future use
-	if err := saveToken(cfg.TokenPath, token); err != nil {
-		// Log warning but don't fail
-		fmt.Printf("Warning: could not save token: %v\n", err)
-	}
-
-	return oauthConfig.Client(ctx, token), nil
-}
-
 // getTokenFromWeb starts a local server and initiates browser-based OAuth flow.
 func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
 	// Use the explicit IPv4 loopback address to match the server bind address.
@@ -191,46 +150,8 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	return token, nil
 }
 
-// loadToken reads a token from a file.
-func loadToken(path string) (*oauth2.Token, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var token oauth2.Token
-	if err := json.NewDecoder(f).Decode(&token); err != nil {
-		return nil, err
-	}
-
-	return &token, nil
-}
-
-// saveToken saves a token to a file.
-func saveToken(path string, token *oauth2.Token) error {
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return json.NewEncoder(f).Encode(token)
-}
-
 // LoadTokenFromStore retrieves and parses a token from the SecretStore.
 func LoadTokenFromStore(store secrets.SecretStore) (*oauth2.Token, error) {
-	return loadTokenFromStore(store)
-}
-
-// loadTokenFromStore retrieves and parses a token from the SecretStore.
-func loadTokenFromStore(store secrets.SecretStore) (*oauth2.Token, error) {
 	data, err := store.Get(secrets.KeyOAuthToken)
 	if err != nil {
 		return nil, err
@@ -265,7 +186,7 @@ func ClientFromStore(ctx context.Context, cfg *Config, store secrets.SecretStore
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
 	}
-	token, err := loadTokenFromStore(store)
+	token, err := LoadTokenFromStore(store)
 	if err != nil {
 		return nil, fmt.Errorf("token not found in store: %w", err)
 	}
@@ -292,7 +213,7 @@ func AuthenticateWithStore(ctx context.Context, cfg *Config, store secrets.Secre
 	}
 
 	// Try to load existing token from store
-	token, err := loadTokenFromStore(store)
+	token, err := LoadTokenFromStore(store)
 	if err == nil {
 		if token.Valid() || token.RefreshToken != "" {
 			return oauthConfig.Client(ctx, token), nil
@@ -316,7 +237,7 @@ func AuthenticateWithStore(ctx context.Context, cfg *Config, store secrets.Secre
 // EnsureTokenFreshWithStore checks if the saved Google OAuth token is still
 // valid and refreshes it if needed, using a SecretStore for I/O.
 func EnsureTokenFreshWithStore(ctx context.Context, cfg *Config, store secrets.SecretStore) error {
-	token, err := loadTokenFromStore(store)
+	token, err := LoadTokenFromStore(store)
 	if err != nil {
 		return fmt.Errorf("no saved Google token found, run 'get-out auth login' first: %w", err)
 	}
@@ -348,73 +269,6 @@ func EnsureTokenFreshWithStore(ctx context.Context, cfg *Config, store secrets.S
 
 	if err := saveTokenToStore(store, newToken); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not save refreshed token to store: %v\n", err)
-	}
-
-	return nil
-}
-
-// HasCredentials checks if credentials.json exists.
-func HasCredentials(cfg *Config) bool {
-	_, err := os.Stat(cfg.CredentialsPath)
-	return err == nil
-}
-
-// HasToken checks if a saved token exists.
-func HasToken(cfg *Config) bool {
-	_, err := os.Stat(cfg.TokenPath)
-	return err == nil
-}
-
-// IsTokenValid checks if the saved token is still valid.
-func IsTokenValid(cfg *Config) bool {
-	token, err := loadToken(cfg.TokenPath)
-	if err != nil {
-		return false
-	}
-	return token.Valid()
-}
-
-// EnsureTokenFresh checks if the saved Google OAuth token is still valid.
-// If expired but a refresh token exists, it proactively refreshes and saves the token.
-// Returns nil if the token is ready to use, or an error if re-authentication is needed.
-func EnsureTokenFresh(ctx context.Context, cfg *Config) error {
-	token, err := loadToken(cfg.TokenPath)
-	if err != nil {
-		return fmt.Errorf("no saved Google token found, run 'get-out auth' first: %w", err)
-	}
-
-	// Token is still valid
-	if token.Valid() {
-		return nil
-	}
-
-	// Token expired but has refresh token — try to refresh
-	if token.RefreshToken == "" {
-		return fmt.Errorf("Google token expired and no refresh token available, run 'get-out auth' to re-authenticate")
-	}
-
-	// Read credentials to build oauth config
-	credBytes, err := os.ReadFile(cfg.CredentialsPath)
-	if err != nil {
-		return fmt.Errorf("unable to read credentials for token refresh: %w", err)
-	}
-
-	oauthConfig, err := google.ConfigFromJSON(credBytes, Scopes...)
-	if err != nil {
-		return fmt.Errorf("unable to parse credentials: %w", err)
-	}
-
-	// Use TokenSource to auto-refresh
-	tokenSource := oauthConfig.TokenSource(ctx, token)
-	newToken, err := tokenSource.Token()
-	if err != nil {
-		return fmt.Errorf("Google token refresh failed, run 'get-out auth' to re-authenticate: %w", err)
-	}
-
-	// Save the refreshed token
-	if err := saveToken(cfg.TokenPath, newToken); err != nil {
-		// Non-fatal: token was refreshed but we couldn't save it
-		fmt.Fprintf(os.Stderr, "Warning: could not save refreshed token: %v\n", err)
 	}
 
 	return nil

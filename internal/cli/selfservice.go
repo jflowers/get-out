@@ -130,7 +130,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Step 4: Create starter settings.json if absent.
 	settingsPath := filepath.Join(newDir, "settings.json")
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
-		if err := os.WriteFile(settingsPath, []byte("{}\n"), 0644); err != nil {
+		if err := os.WriteFile(settingsPath, []byte("{}\n"), 0600); err != nil {
 			return fmt.Errorf("failed to create settings.json: %w", err)
 		}
 		fmt.Println("Created settings.json template.")
@@ -153,7 +153,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return fmt.Errorf("failed to marshal settings: %w", err)
 			}
-			if err := os.WriteFile(settingsPath, append(data, '\n'), 0644); err != nil {
+			if err := os.WriteFile(settingsPath, append(data, '\n'), 0600); err != nil {
 				return fmt.Errorf("failed to save settings.json: %w", err)
 			}
 			fmt.Printf("Saved folder ID to settings.json.\n")
@@ -281,8 +281,8 @@ var doctorCmd = &cobra.Command{
 
 Checks:
   1.  Config directory exists and has correct permissions
-  2.  credentials.json is present (and has safe permissions)
-  3.  token.json is present (and has safe permissions)
+  2.  credentials.json is present in the secret store
+  3.  token.json is present in the secret store
   4.  OAuth token is valid or can be refreshed
   5.  Google Drive API is reachable
   6.  conversations.json is valid
@@ -322,16 +322,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if tokenPresent {
 		gdriveAPIOK = checkTokenValidity(configDir, secretStore, &passCount, &warnCount, &failCount)
 	} else {
-		warn("OAuth token check skipped (token.json absent)")
-		warnCount++
+		fmt.Println(dimStyle.Render("  — OAuth token check skipped (token absent)"))
 	}
 
 	// Check 5: Drive API
 	if gdriveAPIOK {
 		checkDriveAPI(configDir, secretStore, &passCount, &warnCount, &failCount)
 	} else {
-		warn("Drive API check skipped")
-		warnCount++
+		fmt.Println(dimStyle.Render("  — Drive API check skipped"))
 	}
 
 	// Check 6: conversations.json
@@ -378,7 +376,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	fmt.Println("─────────────────────────────────────────")
 
 	if failCount > 0 {
-		return fmt.Errorf("doctor: %d check(s) failed", failCount)
+		os.Exit(1)
 	}
 	return nil
 }
@@ -453,12 +451,14 @@ func checkTokenValidity(dir string, store secrets.SecretStore, pass_, warn_, fai
 }
 
 // checkDriveAPI checks check 5.
+// ClientFromStore is used (not AuthenticateWithStore) so that doctor never
+// initiates an interactive browser OAuth flow — it is a read-only diagnostic.
 func checkDriveAPI(dir string, store secrets.SecretStore, pass_, warn_, fail_ *int) {
 	cfg := gdrive.DefaultConfig(dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := gdrive.AuthenticateWithStore(ctx, cfg, store)
+	client, err := gdrive.ClientFromStore(ctx, cfg, store)
 	if err != nil {
 		fail("Drive API: authentication error — " + err.Error())
 		hint("Run: get-out auth login")
@@ -756,6 +756,12 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// If no Slack tab was found in step 3, steps 4–5 were skipped —
+	// mark as failed so the footer correctly reflects incomplete setup.
+	if !slackTabFound {
+		stepFailed = true
+	}
+
 	fmt.Println()
 	fmt.Println("─────────────────────────────────────────")
 	if !stepFailed {
@@ -766,7 +772,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	fmt.Println("─────────────────────────────────────────")
 
 	if stepFailed {
-		return fmt.Errorf("setup incomplete: one or more steps failed")
+		os.Exit(1)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,26 +282,22 @@ func TestNewStore_KeychainAvailable(t *testing.T) {
 	}
 }
 
-// TestNewStore_KeychainUnavailable verifies fallback to FileStore on probe failure.
-// MockInitWithError causes Get to return an error that is not ErrNotFound, so
-// the lightweight read-only probe falls back to FileStore.
+// TestNewStore_KeychainUnavailable verifies fallback to FileStore when the OS
+// keychain returns a non-ErrNotFound error (e.g., keychain locked/daemon absent).
+// The read-only probe in NewStore treats ErrNotFound as "keychain available"
+// (key simply absent), but any other error signals a genuinely unavailable
+// keychain and triggers the FileStore fallback.
 func TestNewStore_KeychainUnavailable(t *testing.T) {
-	keyring.MockInitWithError(keyring.ErrNotFound)
+	keyring.MockInitWithError(errors.New("keychain locked"))
 	t.Cleanup(resetMock)
 	dir := t.TempDir()
 
-	// With MockInitWithError(ErrNotFound), every operation returns ErrNotFound.
-	// Our read-only probe treats ErrNotFound as "keychain available" (key just absent).
-	// To simulate a truly unavailable keychain we need a non-ErrNotFound error.
-	// Use a custom mock that wraps the error as a system failure.
-	// Since go-keyring mock only supports ErrNotFound, we test the noKeyring path instead
-	// to cover the FileStore fallback branch.
-	store, backend := NewStore(true, dir)
+	store, backend := NewStore(false, dir) // noKeyring=false — probe must decide
 	if backend != BackendFile {
-		t.Fatalf("NewStore(unavailable keyring): backend=%v, want BackendFile", backend)
+		t.Fatalf("NewStore with unavailable keychain: backend=%v, want BackendFile", backend)
 	}
 	if _, ok := store.(*FileStore); !ok {
-		t.Fatalf("NewStore(unavailable keyring): store type=%T, want *FileStore", store)
+		t.Fatalf("NewStore with unavailable keychain: store type=%T, want *FileStore", store)
 	}
 }
 

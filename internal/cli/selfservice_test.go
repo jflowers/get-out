@@ -232,8 +232,8 @@ func TestCheckConfigDir(t *testing.T) {
 		}
 		var p, w, f int
 		checkConfigDir(dir, secrets.BackendKeychain, &p, &w, &f)
-		if p != 1 {
-			t.Errorf("got pass=%d want=1", p)
+		if p != 1 || w != 0 || f != 0 {
+			t.Errorf("got pass=%d warn=%d fail=%d, want pass=1 warn=0 fail=0", p, w, f)
 		}
 		// The backend string should be "OS keychain" for BackendKeychain.
 		if secrets.BackendKeychain.String() != "OS keychain" {
