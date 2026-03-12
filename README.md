@@ -361,6 +361,51 @@ get-out/
 └── specs/                # Feature specifications
 ```
 
+## CI / Quality Gates
+
+Every push and pull request runs the full CI pipeline defined in `.github/workflows/ci.yml`. The pipeline includes automated code quality analysis via [gaze](https://github.com/unbound-force/gaze), which enforces hard quality gates on every PR targeting `main`.
+
+### Pipeline Steps
+
+| Step | What it does |
+|---|---|
+| Build | Compiles all packages — fails fast on build errors |
+| Vet | Runs `go vet` — catches common correctness issues |
+| Test | Runs the full test suite with race detection and generates a coverage profile |
+| Install gaze | Installs the gaze quality analysis tool |
+| Install OpenCode | Installs the OpenCode CLI (used by gaze as its AI backend) |
+| Gaze quality report | Analyses CRAP scores and contract coverage; writes a formatted report to the Step Summary tab |
+
+### Quality Gates
+
+The `Gaze quality report` step enforces three hard gates. A PR is **blocked** if any gate is breached:
+
+| Gate | Threshold | What it measures |
+|---|---|---|
+| `--max-crapload` | 10 | Maximum number of functions exceeding the CRAP score threshold (complexity × lack of coverage) |
+| `--max-gaze-crapload` | 5 | Maximum number of functions exceeding the GazeCRAP threshold (complexity × lack of contract coverage) |
+| `--min-contract-coverage` | 50% | Minimum average contract coverage — the percentage of contractual side effects that tests actually assert on |
+
+### Reading a Gate Failure
+
+When a gate is breached, the CI step exits non-zero and the PR check fails. To understand why:
+
+1. Open the failed GitHub Actions run
+2. Click the **Summary** tab at the top of the run page
+3. The gaze quality report is there in plain language, showing which functions exceeded their thresholds and why
+
+No log parsing or artifact downloads needed — the full report is in the Step Summary.
+
+### Changing Thresholds
+
+All threshold values live in `.github/workflows/ci.yml` in the `Gaze quality report` step's `run:` block. Edit that file to tighten or loosen any gate. No changes to source code or tool configuration are required.
+
+To disable a specific gate entirely, remove its flag from the `run:` block. To enforce zero tolerance, set the flag to `0` (e.g. `--max-crapload=0`).
+
+### Required Secret
+
+The `Gaze quality report` step requires an `OPENCODE_API_KEY` secret set in the repository's GitHub Actions secrets (`Settings → Secrets and variables → Actions`). This key authenticates the OpenCode CLI against the [OpenCode Zen](https://opencode.ai/docs/zen) model tier. Without it, the step will fail.
+
 ## How It Works
 
 ### Browser Mode (for DMs/Groups)
