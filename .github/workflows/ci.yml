@@ -33,7 +33,7 @@ jobs:
         run: go test -race -v -count=1 -coverprofile=coverage.out ./...
 
       - name: Install gaze
-        run: go install github.com/unbound-force/gaze/cmd/gaze@latest
+        run: go install github.com/unbound-force/gaze/cmd/gaze@v1.2.11
 
       - name: Install OpenCode
         run: npm install -g opencode-ai
