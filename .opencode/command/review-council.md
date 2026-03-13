@@ -1,7 +1,6 @@
 ---
 description: Run the four-reviewer governance council to audit codebase or spec compliance.
 ---
-<!-- scaffolded by gaze v1.2.7 -->
 
 # Command: /review-council
 
@@ -30,22 +29,23 @@ Review the current codebase for compliance with the Behavioral Constraints in `A
 
 ### Instructions
 
-1. Delegate the review to all four council agents in parallel using the Task tool:
+1. **Replicate CI checks locally before delegating to council agents.** Read `.github/workflows/` to identify the exact commands CI runs, then execute those same commands. Any failure is a CRITICAL finding that must be fixed before the council review begins. Do not rely on a memorized list of commands — always derive them from the workflow files, which are the source of truth. This catches failures (e.g. linter violations) that code reading alone cannot reliably detect.
+
+2. Delegate the review to all four council agents in parallel using the Task tool:
    - `reviewer-adversary` — audits for security, resilience, efficiency, and constraint violations
    - `reviewer-architect` — audits for architectural alignment, coding conventions, and plan adherence
    - `reviewer-guard` — audits for intent drift, neighborhood impact, and zero-waste compliance
    - `reviewer-testing` — audits for test architecture, coverage strategy, assertion quality, and testing convention compliance
-   - `reviewer-sre` — audits for deployment and operational readiness ensuring code and specs are production-viable, maintainable, and observable in runtime.
 
    For each agent, instruct it to review the current changes and return its verdict (**APPROVE** or **REQUEST CHANGES**) along with all findings.
 
-2. Collect all **REQUEST CHANGES** findings from the four reviewers. If all four return **APPROVE**, report the result and stop.
+3. Collect all **REQUEST CHANGES** findings from the four reviewers. If all four return **APPROVE**, report the result and stop.
 
-3. If there are **REQUEST CHANGES**, address the findings by making the necessary code fixes. Then re-run all four reviewers to verify the fixes. Repeat this loop until all four return **APPROVE** or the process has exceeded 3 iterations.
+4. If there are **REQUEST CHANGES**, address the findings by making the necessary code fixes. Then re-run all four reviewers to verify the fixes. Repeat this loop until all four return **APPROVE** or the process has exceeded 3 iterations.
 
-4. If 3 iterations are exceeded, ask the user whether to continue or stop.
+5. If 3 iterations are exceeded, ask the user whether to continue or stop.
 
-5. Provide a final report to the user:
+6. Provide a final report to the user:
    - What was found in each iteration
    - What was fixed
    - If stopped early, the current set of outstanding **REQUEST CHANGES**
@@ -64,7 +64,6 @@ Review all SpecKit artifacts under `specs/` for quality, consistency, and alignm
    - `reviewer-architect` — audits specs for structural consistency, plan-to-spec alignment, task coverage, data model coherence, tech stack feasibility, and research quality
    - `reviewer-guard` — audits specs for intent fidelity, scope creep, inter-feature conflicts, status accuracy, user value, and constitution alignment
    - `reviewer-testing` — audits specs for testability of requirements, coverage strategy definition, fixture feasibility, and contract surface clarity
-   - `reviewer-sre` — audits specs for deployment and operational readiness ensuring code and specs are production-viable, maintainable, and observable in runtime.
 
    For each agent, instruct it to **operate in Spec Review Mode**: review all SpecKit artifacts under `specs/` (not code), plus `.specify/memory/constitution.md` and `AGENTS.md`. Instruct the agent to return its verdict (**APPROVE** or **REQUEST CHANGES**) along with all findings.
 
