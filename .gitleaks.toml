@@ -1,0 +1,11 @@
+[allowlist]
+description = "False positives from test fixture data in pkg/gdrive/auth_test.go"
+
+# The flagged strings are hardcoded dummy values used in Google OAuth
+# unit test fixtures — not real credentials.
+#   - "test-secret" is the fake client_secret
+#   - "test.apps.googleusercontent.com" is the fake client_id
+regexes = [
+  '''test-secret''',
+  '''test\.apps\.googleusercontent\.com''',
+]
