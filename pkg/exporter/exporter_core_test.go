@@ -861,9 +861,12 @@ func TestResolveLinksInDoc_APIError(t *testing.T) {
 
 	exp := testExporter(t, driveMux, noopSlackMux())
 
-	_, err := exp.resolveLinksInDoc(context.Background(), "nonexistent-doc")
+	replaced, err := exp.resolveLinksInDoc(context.Background(), "nonexistent-doc")
 	if err == nil {
 		t.Fatal("expected error for non-existent doc, got nil")
+	}
+	if replaced != 0 {
+		t.Errorf("expected 0 replacements on error, got %d", replaced)
 	}
 }
 
@@ -982,9 +985,13 @@ func TestResolveCrossLinks_ProcessesDocsAndThreads(t *testing.T) {
 		},
 	}
 
-	_, err := exp.ResolveCrossLinks(context.Background())
+	replaced, err := exp.ResolveCrossLinks(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	// No Slack links in the doc content, so 0 replacements expected
+	if replaced != 0 {
+		t.Errorf("expected 0 replacements, got %d", replaced)
 	}
 
 	// Both docs should have been queried
@@ -1141,11 +1148,14 @@ func TestExportAll_ValidationFailure(t *testing.T) {
 		index: NewExportIndex(""),
 	}
 
-	_, err := exp.ExportAll(context.Background(), []config.ConversationConfig{
+	results, err := exp.ExportAll(context.Background(), []config.ConversationConfig{
 		{ID: "C001", Name: "general", Type: models.ConversationTypeChannel},
 	})
 	if err == nil {
 		t.Fatal("expected validation failure")
+	}
+	if results != nil {
+		t.Error("expected nil results on error")
 	}
 	if !strings.Contains(err.Error(), "pre-export validation failed") {
 		t.Errorf("unexpected error: %v", err)
@@ -2328,9 +2338,12 @@ func TestExportConversation_SyncMode(t *testing.T) {
 		Type: models.ConversationTypeChannel,
 	}
 
-	_, err := exp.ExportConversation(context.Background(), conv)
+	result, err := exp.ExportConversation(context.Background(), conv)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 
 	// Verify that the oldest parameter was passed from the index
@@ -2384,9 +2397,12 @@ func TestExportConversation_DateRangeMode(t *testing.T) {
 		Type: models.ConversationTypeChannel,
 	}
 
-	_, err := exp.ExportConversation(context.Background(), conv)
+	result, err := exp.ExportConversation(context.Background(), conv)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 
 	if capturedOldest != "1706700000.000000" {
@@ -2463,9 +2479,12 @@ func TestExportConversation_FetchMessagesError(t *testing.T) {
 		Type: models.ConversationTypeChannel,
 	}
 
-	_, err := exp.ExportConversation(context.Background(), conv)
+	result, err := exp.ExportConversation(context.Background(), conv)
 	if err == nil {
 		t.Fatal("expected error for channel_not_found")
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result (carries partial info on error)")
 	}
 	if !strings.Contains(err.Error(), "failed to fetch messages") {
 		t.Errorf("unexpected error: %v", err)
@@ -2488,9 +2507,12 @@ func TestExportConversation_FolderCreationError(t *testing.T) {
 		Type: models.ConversationTypeChannel,
 	}
 
-	_, err := exp.ExportConversation(context.Background(), conv)
+	result, err := exp.ExportConversation(context.Background(), conv)
 	if err == nil {
 		t.Fatal("expected error for folder creation failure")
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result (carries partial info on error)")
 	}
 	if !strings.Contains(err.Error(), "failed to create folder") {
 		t.Errorf("unexpected error: %v", err)
@@ -2645,11 +2667,14 @@ func TestExportAllParallel_ValidationFailure(t *testing.T) {
 		index: NewExportIndex(""),
 	}
 
-	_, err := exp.ExportAllParallel(context.Background(), []config.ConversationConfig{
+	results, err := exp.ExportAllParallel(context.Background(), []config.ConversationConfig{
 		{ID: "C001", Name: "general", Type: models.ConversationTypeChannel},
 	}, 2)
 	if err == nil {
 		t.Fatal("expected validation failure")
+	}
+	if results != nil {
+		t.Error("expected nil results on error")
 	}
 	if !strings.Contains(err.Error(), "pre-export validation failed") {
 		t.Errorf("unexpected error: %v", err)
@@ -3276,9 +3301,12 @@ func TestExportConversation_SyncModeNoPreviousExport(t *testing.T) {
 		Type: models.ConversationTypeChannel,
 	}
 
-	_, err := exp.ExportConversation(context.Background(), conv)
+	result, err := exp.ExportConversation(context.Background(), conv)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
 	}
 
 	// No oldest filter should have been sent (empty string)
@@ -3377,7 +3405,8 @@ func TestExportAllParallel_LoadUsersError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	_, err := exp.ExportAllParallel(ctx, conversations, 2)
+	results, err := exp.ExportAllParallel(ctx, conversations, 2)
+	_ = results // may be nil or partial on cancellation
 	// Should fail either at validation or user loading
 	if err == nil {
 		// The validation call (auth.test) may succeed if the http client doesn't check context.
@@ -3741,8 +3770,10 @@ func TestResolveCrossLinks_WithSlackLinks(t *testing.T) {
 		index:        index,
 	}
 
-	_, err := exp.ResolveCrossLinks(context.Background())
+	replaced, err := exp.ResolveCrossLinks(context.Background())
 	if err != nil {
 		t.Fatalf("ResolveCrossLinks: %v", err)
 	}
+	// The replaced count may be 0 or more depending on mock response
+	_ = replaced
 }

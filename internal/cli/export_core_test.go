@@ -45,9 +45,12 @@ func TestSelectConversations_ByArgs(t *testing.T) {
 func TestSelectConversations_ByArgs_NotFound(t *testing.T) {
 	cfg := testConversationsConfig()
 
-	_, err := selectConversations(cfg, []string{"CNOTEXIST"}, false, false)
+	result, err := selectConversations(cfg, []string{"CNOTEXIST"}, false, false)
 	if err == nil {
 		t.Fatal("expected error for missing conversation, got nil")
+	}
+	if result != nil {
+		t.Error("expected nil result on error")
 	}
 	if !strings.Contains(err.Error(), "CNOTEXIST") {
 		t.Errorf("error should mention the missing ID, got: %v", err)

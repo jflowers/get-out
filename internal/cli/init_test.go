@@ -127,9 +127,12 @@ func TestScaffoldConfigDir_NotADirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := scaffoldConfigDir(filePath)
+	created, err := scaffoldConfigDir(filePath)
 	if err == nil {
 		t.Fatal("scaffoldConfigDir() = nil error, want error for non-directory path")
+	}
+	if created != nil {
+		t.Error("expected nil created list on error")
 	}
 	if !strings.Contains(err.Error(), "not a directory") {
 		t.Errorf("error = %q, want it to mention 'not a directory'", err)

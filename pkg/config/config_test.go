@@ -88,9 +88,12 @@ func TestLoadConversations_Invalid(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err := LoadConversations(path)
+			cfg, err := LoadConversations(path)
 			if err == nil {
 				t.Error("LoadConversations() expected error, got nil")
+			}
+			if cfg != nil {
+				t.Error("expected nil config on error")
 			}
 		})
 	}

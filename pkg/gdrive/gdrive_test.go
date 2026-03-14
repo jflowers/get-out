@@ -646,9 +646,12 @@ func TestFindDocument_QueryContainsMimeTypeAndFolder(t *testing.T) {
 	})
 	c := testClient(t, mux)
 
-	_, err := c.FindDocument(context.Background(), "test", "folder-id")
+	doc, err := c.FindDocument(context.Background(), "test", "folder-id")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if doc != nil {
+		t.Error("expected nil doc for empty result set")
 	}
 }
 
@@ -666,9 +669,12 @@ func TestFindFolder_QueryContainsMimeTypeFolder(t *testing.T) {
 	})
 	c := testClient(t, mux)
 
-	_, err := c.FindFolder(context.Background(), "test", "")
+	folder, err := c.FindFolder(context.Background(), "test", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if folder != nil {
+		t.Error("expected nil folder for empty result set")
 	}
 }
 

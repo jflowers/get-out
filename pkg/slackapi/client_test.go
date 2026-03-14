@@ -83,7 +83,10 @@ func TestDoRequest_AuthHeaders_BrowserMode(t *testing.T) {
 
 	client := newBrowserTestClient(server)
 	var resp AuthTestResponse
-	_ = client.doRequest(context.Background(), "POST", "auth.test", nil, &resp)
+	err := client.doRequest(context.Background(), "POST", "auth.test", nil, &resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if gotAuth != "Bearer test-token" {
 		t.Errorf("expected Authorization='Bearer test-token', got %q", gotAuth)
@@ -106,7 +109,10 @@ func TestDoRequest_AuthHeaders_APIMode(t *testing.T) {
 
 	client := newAPITestClient(server)
 	var resp AuthTestResponse
-	_ = client.doRequest(context.Background(), "POST", "auth.test", nil, &resp)
+	err := client.doRequest(context.Background(), "POST", "auth.test", nil, &resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if gotAuth != "Bearer test-token" {
 		t.Errorf("expected Authorization='Bearer test-token', got %q", gotAuth)
@@ -366,9 +372,12 @@ func TestGetConversationHistory_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.GetConversationHistory(context.Background(), "CBAD", nil)
+	resp, err := client.GetConversationHistory(context.Background(), "CBAD", nil)
 	if err == nil {
 		t.Fatal("expected error for channel_not_found, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	if !IsNotFoundError(err) {
 		t.Errorf("expected NotFoundError, got %T: %v", err, err)
@@ -390,7 +399,7 @@ func TestGetConversationHistory_PassesOptions(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.GetConversationHistory(context.Background(), "C123", &HistoryOptions{
+	resp, err := client.GetConversationHistory(context.Background(), "C123", &HistoryOptions{
 		Oldest:    "111.000",
 		Latest:    "999.000",
 		Inclusive: true,
@@ -398,6 +407,9 @@ func TestGetConversationHistory_PassesOptions(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
 	}
 	if gotOldest != "111.000" {
 		t.Errorf("expected oldest='111.000', got %q", gotOldest)
@@ -483,9 +495,12 @@ func TestGetConversationReplies_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.GetConversationReplies(context.Background(), "C123", "9999.0001", nil)
+	resp, err := client.GetConversationReplies(context.Background(), "C123", "9999.0001", nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	if !IsNotFoundError(err) {
 		t.Errorf("expected NotFoundError, got %T: %v", err, err)
@@ -841,9 +856,12 @@ func TestGetUsers_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.GetUsers(context.Background(), "")
+	resp, err := client.GetUsers(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	if !IsAuthError(err) {
 		t.Errorf("expected AuthError, got %T: %v", err, err)
@@ -920,9 +938,12 @@ func TestGetConversationMembers_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.GetConversationMembers(context.Background(), "CBAD", "")
+	resp, err := client.GetConversationMembers(context.Background(), "CBAD", "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	if !IsNotFoundError(err) {
 		t.Errorf("expected NotFoundError, got %T: %v", err, err)
@@ -993,12 +1014,15 @@ func TestListConversations_WithTypesFilter(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.ListConversations(context.Background(), &ListConversationsOptions{
+	resp, err := client.ListConversations(context.Background(), &ListConversationsOptions{
 		Types:           []string{"public_channel", "private_channel"},
 		ExcludeArchived: true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
 	}
 	if gotTypes != "public_channel,private_channel" {
 		t.Errorf("expected types='public_channel,private_channel', got %q", gotTypes)
@@ -1056,9 +1080,12 @@ func TestListConversations_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.ListConversations(context.Background(), nil)
+	resp, err := client.ListConversations(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	apiErr, ok := err.(*APIError)
 	if !ok {
@@ -1175,9 +1202,12 @@ func TestDownloadFile_Non200Status(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.DownloadFile(context.Background(), server.URL+"/files/download")
+	data, err := client.DownloadFile(context.Background(), server.URL+"/files/download")
 	if err == nil {
 		t.Fatal("expected error for non-200 status, got nil")
+	}
+	if data != nil {
+		t.Error("expected nil data on error")
 	}
 	expected := "failed to download file: status 403 Forbidden"
 	if err.Error() != expected {
@@ -1188,9 +1218,12 @@ func TestDownloadFile_Non200Status(t *testing.T) {
 func TestDownloadFile_RequestError(t *testing.T) {
 	client := newBrowserTestClient(httptest.NewServer(http.NotFoundHandler()))
 	// Use a URL that will fail to connect
-	_, err := client.DownloadFile(context.Background(), "http://127.0.0.1:1/nonexistent")
+	data, err := client.DownloadFile(context.Background(), "http://127.0.0.1:1/nonexistent")
 	if err == nil {
 		t.Fatal("expected error for connection failure, got nil")
+	}
+	if data != nil {
+		t.Error("expected nil data on error")
 	}
 }
 
@@ -1248,9 +1281,12 @@ func TestValidateAuth_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.ValidateAuth(context.Background())
+	resp, err := client.ValidateAuth(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid_auth, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	if !IsAuthError(err) {
 		t.Errorf("expected AuthError, got %T: %v", err, err)
@@ -1269,9 +1305,12 @@ func TestValidateAuth_TokenRevoked(t *testing.T) {
 	defer server.Close()
 
 	client := newBrowserTestClient(server)
-	_, err := client.ValidateAuth(context.Background())
+	resp, err := client.ValidateAuth(context.Background())
 	if err == nil {
 		t.Fatal("expected error for token_revoked, got nil")
+	}
+	if resp != nil {
+		t.Error("expected nil response on error")
 	}
 	authErr, ok := err.(*AuthError)
 	if !ok {
@@ -1311,9 +1350,12 @@ func TestGetConversationHistory_ErrorCodes(t *testing.T) {
 			defer server.Close()
 
 			client := newBrowserTestClient(server)
-			_, err := client.GetConversationHistory(context.Background(), "C123", nil)
+			resp, err := client.GetConversationHistory(context.Background(), "C123", nil)
 			if err == nil {
 				t.Fatalf("expected error for %s, got nil", tt.errorCode)
+			}
+			if resp != nil {
+				t.Error("expected nil response on error")
 			}
 			if !tt.checkFn(err) {
 				t.Errorf("expected %s to return true for error code %q, got %T: %v",

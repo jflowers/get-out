@@ -326,9 +326,12 @@ func TestListTargets_InvalidJSON(t *testing.T) {
 	}
 
 	s := &Session{debugPort: port}
-	_, err := s.ListTargets(t.Context())
+	result, err := s.ListTargets(t.Context())
 	if err == nil {
 		t.Fatal("expected error for invalid JSON, got nil")
+	}
+	if result != nil {
+		t.Error("expected nil result on error")
 	}
 }
 
@@ -346,18 +349,24 @@ func TestListTargets_ServerError(t *testing.T) {
 
 	s := &Session{debugPort: port}
 	// The body is a plain-text error message — JSON unmarshal will fail.
-	_, err := s.ListTargets(t.Context())
+	result, err := s.ListTargets(t.Context())
 	if err == nil {
 		t.Fatal("expected error on 500 response, got nil")
+	}
+	if result != nil {
+		t.Error("expected nil result on error")
 	}
 }
 
 func TestListTargets_ConnectionRefused(t *testing.T) {
 	// Use a port that (almost certainly) has nothing listening.
 	s := &Session{debugPort: 19}
-	_, err := s.ListTargets(t.Context())
+	result, err := s.ListTargets(t.Context())
 	if err == nil {
 		t.Fatal("expected error when nothing is listening, got nil")
+	}
+	if result != nil {
+		t.Error("expected nil result on error")
 	}
 }
 
@@ -416,9 +425,12 @@ func TestFindSlackTarget_NotFound(t *testing.T) {
 	}
 
 	s := &Session{debugPort: port}
-	_, err := s.FindSlackTarget(t.Context())
+	target, err := s.FindSlackTarget(t.Context())
 	if err == nil {
 		t.Fatal("expected error when no Slack tab, got nil")
+	}
+	if target != nil {
+		t.Error("expected nil target on error")
 	}
 }
 
@@ -443,8 +455,11 @@ func TestFindSlackTarget_IgnoresNonPageTargets(t *testing.T) {
 	}
 
 	s := &Session{debugPort: port}
-	_, err := s.FindSlackTarget(t.Context())
+	target, err := s.FindSlackTarget(t.Context())
 	if err == nil {
 		t.Fatal("expected error — Slack URL on non-page target should be ignored")
+	}
+	if target != nil {
+		t.Error("expected nil target on error")
 	}
 }
