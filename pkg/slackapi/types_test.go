@@ -114,3 +114,99 @@ func TestTSToTime_CorrectDate(t *testing.T) {
 		t.Errorf("TSToTime(1706745603) date = %s, want 2024-02-01", gotUTC.Format("2006-01-02"))
 	}
 }
+
+func TestTSToTime_ContractAssertions(t *testing.T) {
+	// Verify the returned time.Time value, not just seconds
+	got := TSToTime("1706745603.123456")
+
+	// Assert on the full time value
+	gotUTC := got.UTC()
+	if gotUTC.Year() != 2024 {
+		t.Errorf("TSToTime().Year() = %d, want 2024", gotUTC.Year())
+	}
+	if gotUTC.Month() != time.February {
+		t.Errorf("TSToTime().Month() = %v, want February", gotUTC.Month())
+	}
+	if gotUTC.Day() != 1 {
+		t.Errorf("TSToTime().Day() = %d, want 1", gotUTC.Day())
+	}
+
+	// Verify nanosecond component from microseconds
+	if got.Nanosecond() != 123456000 {
+		t.Errorf("TSToTime().Nanosecond() = %d, want 123456000", got.Nanosecond())
+	}
+
+	// Verify zero timestamp returns Unix epoch
+	zero := TSToTime("0")
+	if !zero.Equal(time.Unix(0, 0)) {
+		t.Errorf("TSToTime(\"0\") = %v, want Unix epoch", zero)
+	}
+
+	// Verify the returned value is usable for time comparison
+	earlier := TSToTime("1706745600.000000")
+	later := TSToTime("1706745610.000000")
+	if !later.After(earlier) {
+		t.Error("TSToTime: later timestamp should be After earlier timestamp")
+	}
+}
+
+func TestTSToTime_SubsecondPrecision(t *testing.T) {
+	// Verify microsecond precision is preserved in the returned time
+	tests := []struct {
+		ts       string
+		wantNano int
+	}{
+		{"1706745603.000000", 0},
+		{"1706745603.000001", 1000},
+		{"1706745603.100000", 100000000},
+		{"1706745603.999999", 999999000},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ts, func(t *testing.T) {
+			got := TSToTime(tt.ts)
+			if got.Nanosecond() != tt.wantNano {
+				t.Errorf("TSToTime(%q).Nanosecond() = %d, want %d", tt.ts, got.Nanosecond(), tt.wantNano)
+			}
+		})
+	}
+}
+
+func TestTSToTime_ReturnsTimeType(t *testing.T) {
+	// Verify the returned value is a proper time.Time that supports all standard operations
+	got := TSToTime("1706745603.500000")
+
+	// IsZero should be false for non-epoch timestamps
+	if got.IsZero() {
+		t.Error("TSToTime(non-zero) should not return zero time")
+	}
+
+	// Epoch should not be zero (Unix epoch is not Go zero time)
+	epoch := TSToTime("0")
+	if epoch.Unix() != 0 {
+		t.Errorf("TSToTime(\"0\").Unix() = %d, want 0", epoch.Unix())
+	}
+
+	// Subtraction between times should work
+	t1 := TSToTime("1706745600.000000")
+	t2 := TSToTime("1706745610.000000")
+	diff := t2.Sub(t1)
+	if diff != 10*time.Second {
+		t.Errorf("time difference = %v, want 10s", diff)
+	}
+}
+
+func TestSlackapiGetDisplayName_Priority(t *testing.T) {
+	// Contract assertions: verify the returned string value
+	u := User{
+		Name: "jsmith",
+		Profile: UserProfile{
+			DisplayName: "Johnny",
+			RealName:    "John Smith",
+		},
+	}
+	got := u.GetDisplayName()
+	if got != "Johnny" {
+		t.Errorf("GetDisplayName() = %q, want %q", got, "Johnny")
+	}
+}

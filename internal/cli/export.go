@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -138,25 +139,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine which conversations to export
-	var toExport []config.ConversationConfig
-	if len(args) > 0 {
-		// Export specific conversations
-		for _, id := range args {
-			conv := cfg.GetByID(id)
-			if conv == nil {
-				return fmt.Errorf("conversation not found in config: %s", id)
-			}
-			toExport = append(toExport, *conv)
-		}
-	} else if exportAllDMs {
-		// Export all DM conversations
-		toExport = cfg.FilterByType(models.ConversationTypeDM)
-	} else if exportAllGroups {
-		// Export all group (MPIM) conversations
-		toExport = cfg.FilterByType(models.ConversationTypeMPIM)
-	} else {
-		// Export all with export=true
-		toExport = cfg.FilterByExport()
+	toExport, err := selectConversations(cfg, args, exportAllDMs, exportAllGroups)
+	if err != nil {
+		return err
 	}
 
 	if len(toExport) == 0 {
@@ -183,19 +168,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	// Dry run mode - just show what would be exported
 	if exportDryRun {
-		fmt.Println("DRY RUN - Would export:")
-		fmt.Println()
-		for _, c := range toExport {
-			fmt.Printf("  - %s (%s)\n", c.Name, c.ID)
-			fmt.Printf("    Type: %s, Mode: %s\n", c.Type, c.Mode)
-			if c.Share {
-				fmt.Printf("    Sharing: enabled")
-				if len(c.ShareMembers) > 0 {
-					fmt.Printf(" with %d members", len(c.ShareMembers))
-				}
-				fmt.Println()
-			}
-		}
+		formatExportDryRun(os.Stdout, toExport)
 		return nil
 	}
 
@@ -226,13 +199,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Create exporter
 	// Validate flag combinations
-	if exportSync && (exportFrom != "" || exportTo != "") {
-		return fmt.Errorf("--sync cannot be combined with --from or --to")
-	}
-	if exportResume && (exportFrom != "" || exportTo != "") {
-		return fmt.Errorf("--resume cannot be combined with --from or --to")
+	if err := validateExportFlags(exportSync, exportResume, exportFrom, exportTo); err != nil {
+		return err
 	}
 
 	// Parse date range flags into Slack timestamps
@@ -292,11 +261,95 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("export failed: %w", err)
 	}
 
-	// Print summary
-	fmt.Println()
-	fmt.Println("Export Summary")
-	fmt.Println("==============")
-	fmt.Println()
+	// Build summary from results
+	summaries := make([]ExportResultSummary, len(results))
+	for i, r := range results {
+		summaries[i] = ExportResultSummary{
+			Name:            r.Name,
+			MessageCount:    r.MessageCount,
+			DocsCreated:     r.DocsCreated,
+			ThreadsExported: r.ThreadsExported,
+			Error:           r.Error,
+		}
+	}
+
+	rootURL := exp.GetRootFolderURL()
+	showErrors := verbose || debugMode
+	errorCount := formatExportSummary(os.Stdout, summaries, rootURL, showErrors)
+
+	if errorCount > 0 {
+		return fmt.Errorf("%d export(s) failed", errorCount)
+	}
+
+	return nil
+}
+
+// selectConversations determines which conversations to export based on
+// args, flags (allDMs, allGroups), and the config's export field.
+func selectConversations(cfg *config.ConversationsConfig, args []string, allDMs, allGroups bool) ([]config.ConversationConfig, error) {
+	if len(args) > 0 {
+		var result []config.ConversationConfig
+		for _, id := range args {
+			conv := cfg.GetByID(id)
+			if conv == nil {
+				return nil, fmt.Errorf("conversation not found in config: %s", id)
+			}
+			result = append(result, *conv)
+		}
+		return result, nil
+	}
+	if allDMs {
+		return cfg.FilterByType(models.ConversationTypeDM), nil
+	}
+	if allGroups {
+		return cfg.FilterByType(models.ConversationTypeMPIM), nil
+	}
+	return cfg.FilterByExport(), nil
+}
+
+// validateExportFlags checks for invalid flag combinations.
+func validateExportFlags(syncMode, resumeMode bool, dateFrom, dateTo string) error {
+	if syncMode && (dateFrom != "" || dateTo != "") {
+		return fmt.Errorf("--sync cannot be combined with --from or --to")
+	}
+	if resumeMode && (dateFrom != "" || dateTo != "") {
+		return fmt.Errorf("--resume cannot be combined with --from or --to")
+	}
+	return nil
+}
+
+// formatExportDryRun writes the dry-run output showing what would be exported.
+func formatExportDryRun(w io.Writer, conversations []config.ConversationConfig) {
+	fmt.Fprintln(w, "DRY RUN - Would export:")
+	fmt.Fprintln(w)
+	for _, c := range conversations {
+		fmt.Fprintf(w, "  - %s (%s)\n", c.Name, c.ID)
+		fmt.Fprintf(w, "    Type: %s, Mode: %s\n", c.Type, c.Mode)
+		if c.Share {
+			fmt.Fprintf(w, "    Sharing: enabled")
+			if len(c.ShareMembers) > 0 {
+				fmt.Fprintf(w, " with %d members", len(c.ShareMembers))
+			}
+			fmt.Fprintln(w)
+		}
+	}
+}
+
+// ExportResultSummary holds the display fields from an export result.
+type ExportResultSummary struct {
+	Name            string
+	MessageCount    int
+	DocsCreated     int
+	ThreadsExported int
+	Error           error
+}
+
+// formatExportSummary writes the export results summary and returns the error count.
+func formatExportSummary(w io.Writer, results []ExportResultSummary, rootURL string, showErrors bool) int {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Export Summary")
+	fmt.Fprintln(w, "==============")
+	fmt.Fprintln(w)
 
 	totalMessages := 0
 	totalDocs := 0
@@ -310,15 +363,15 @@ func runExport(cmd *cobra.Command, args []string) error {
 			errorCount++
 		}
 
-		fmt.Printf("%-30s %6d msgs  %3d docs  %3d threads  [%s]\n",
+		fmt.Fprintf(w, "%-30s %6d msgs  %3d docs  %3d threads  [%s]\n",
 			truncateName(r.Name, 30),
 			r.MessageCount,
 			r.DocsCreated,
 			r.ThreadsExported,
 			status)
 
-		if r.Error != nil && (verbose || debugMode) {
-			fmt.Printf("  Error: %v\n", r.Error)
+		if r.Error != nil && showErrors {
+			fmt.Fprintf(w, "  Error: %v\n", r.Error)
 		}
 
 		totalMessages += r.MessageCount
@@ -326,26 +379,20 @@ func runExport(cmd *cobra.Command, args []string) error {
 		totalThreads += r.ThreadsExported
 	}
 
-	fmt.Println()
-	fmt.Printf("Total: %d messages, %d docs, %d threads\n", totalMessages, totalDocs, totalThreads)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Total: %d messages, %d docs, %d threads\n", totalMessages, totalDocs, totalThreads)
 
 	if errorCount > 0 {
-		fmt.Printf("Errors: %d conversation(s) failed\n", errorCount)
+		fmt.Fprintf(w, "Errors: %d conversation(s) failed\n", errorCount)
 	}
 
-	// Print folder URL
-	rootURL := exp.GetRootFolderURL()
 	if rootURL != "" {
-		fmt.Println()
-		fmt.Println("Export folder:")
-		fmt.Printf("  %s\n", rootURL)
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Export folder:")
+		fmt.Fprintf(w, "  %s\n", rootURL)
 	}
 
-	if errorCount > 0 {
-		return fmt.Errorf("%d export(s) failed", errorCount)
-	}
-
-	return nil
+	return errorCount
 }
 
 // truncateName shortens a name for display.

@@ -1,6 +1,7 @@
 package slackapi
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -74,24 +75,36 @@ func TestClassifyError(t *testing.T) {
 
 			switch tt.wantType {
 			case "rate_limit":
-				if !IsRateLimitError(err) {
-					t.Errorf("expected RateLimitError, got %T", err)
+				if got := IsRateLimitError(err); got != true {
+					t.Errorf("IsRateLimitError() = %v, want true (got %T)", got, err)
 				}
 				rle := err.(*RateLimitError)
 				if rle.RetryAfter != tt.retryAfter {
 					t.Errorf("RetryAfter = %v, want %v", rle.RetryAfter, tt.retryAfter)
 				}
 			case "auth":
-				if !IsAuthError(err) {
-					t.Errorf("expected AuthError, got %T", err)
+				if got := IsAuthError(err); got != true {
+					t.Errorf("IsAuthError() = %v, want true (got %T)", got, err)
+				}
+				ae := err.(*AuthError)
+				if ae.Code != tt.code {
+					t.Errorf("AuthError.Code = %q, want %q", ae.Code, tt.code)
 				}
 			case "not_found":
-				if !IsNotFoundError(err) {
-					t.Errorf("expected NotFoundError, got %T", err)
+				if got := IsNotFoundError(err); got != true {
+					t.Errorf("IsNotFoundError() = %v, want true (got %T)", got, err)
+				}
+				nfe := err.(*NotFoundError)
+				if nfe.ResourceType == "" {
+					t.Error("NotFoundError.ResourceType should not be empty")
 				}
 			case "api":
-				if _, ok := err.(*APIError); !ok {
+				apiErr, ok := err.(*APIError)
+				if !ok {
 					t.Errorf("expected APIError, got %T", err)
+				}
+				if apiErr.Code != tt.code {
+					t.Errorf("APIError.Code = %q, want %q", apiErr.Code, tt.code)
 				}
 			}
 		})
@@ -169,5 +182,81 @@ func TestErrorMessages(t *testing.T) {
 				t.Errorf("Error() = %q, want %q", tt.err.Error(), tt.want)
 			}
 		})
+	}
+}
+
+func TestIsAuthError_ContractAssertions(t *testing.T) {
+	// Direct AuthError type
+	authErr := &AuthError{Code: "invalid_auth"}
+	if got := IsAuthError(authErr); got != true {
+		t.Errorf("IsAuthError(AuthError) = %v, want true", got)
+	}
+
+	// RateLimitError is not an auth error
+	rle := &RateLimitError{RetryAfter: 1 * time.Second}
+	if got := IsAuthError(rle); got != false {
+		t.Errorf("IsAuthError(RateLimitError) = %v, want false", got)
+	}
+
+	// NotFoundError is not an auth error
+	nfe := &NotFoundError{ResourceType: "channel", ResourceID: "C123"}
+	if got := IsAuthError(nfe); got != false {
+		t.Errorf("IsAuthError(NotFoundError) = %v, want false", got)
+	}
+
+	// Plain error is not an auth error
+	plainErr := fmt.Errorf("some random error")
+	if got := IsAuthError(plainErr); got != false {
+		t.Errorf("IsAuthError(plain error) = %v, want false", got)
+	}
+
+	// APIError with non-auth code is not an auth error
+	apiErr := &APIError{Code: "missing_scope"}
+	if got := IsAuthError(apiErr); got != false {
+		t.Errorf("IsAuthError(APIError{Code: missing_scope}) = %v, want false", got)
+	}
+}
+
+func TestIsNotFoundError_ContractAssertions(t *testing.T) {
+	// Direct NotFoundError type
+	nfe := &NotFoundError{ResourceType: "channel", ResourceID: "C123"}
+	if got := IsNotFoundError(nfe); got != true {
+		t.Errorf("IsNotFoundError(NotFoundError) = %v, want true", got)
+	}
+
+	// AuthError is not a not-found error
+	ae := &AuthError{Code: "invalid_auth"}
+	if got := IsNotFoundError(ae); got != false {
+		t.Errorf("IsNotFoundError(AuthError) = %v, want false", got)
+	}
+
+	// RateLimitError is not a not-found error
+	rle := &RateLimitError{RetryAfter: 1 * time.Second}
+	if got := IsNotFoundError(rle); got != false {
+		t.Errorf("IsNotFoundError(RateLimitError) = %v, want false", got)
+	}
+
+	// Plain error is not a not-found error
+	plainErr := fmt.Errorf("network timeout")
+	if got := IsNotFoundError(plainErr); got != false {
+		t.Errorf("IsNotFoundError(plain error) = %v, want false", got)
+	}
+
+	// APIError with non-not-found code is not a not-found error
+	apiErr := &APIError{Code: "invalid_auth"}
+	if got := IsNotFoundError(apiErr); got != false {
+		t.Errorf("IsNotFoundError(APIError{Code: invalid_auth}) = %v, want false", got)
+	}
+}
+
+func TestIsRateLimitError_ContractAssertions(t *testing.T) {
+	rle := &RateLimitError{RetryAfter: 30 * time.Second}
+	if got := IsRateLimitError(rle); got != true {
+		t.Errorf("IsRateLimitError(RateLimitError) = %v, want true", got)
+	}
+
+	ae := &AuthError{Code: "invalid_auth"}
+	if got := IsRateLimitError(ae); got != false {
+		t.Errorf("IsRateLimitError(AuthError) = %v, want false", got)
 	}
 }

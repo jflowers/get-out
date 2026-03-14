@@ -98,71 +98,30 @@ func (w *DocWriter) messageToBlock(ctx context.Context, convID string, folderID 
 	}
 
 	// Add attachment info if present
-	if len(msg.Attachments) > 0 {
-		for _, att := range msg.Attachments {
-			if att.Text != "" {
-				if content != "" {
-					content += "\n"
-				}
-				content += "> " + att.Text
-			}
-			if att.Title != "" && att.TitleLink != "" {
-				if content != "" {
-					content += "\n"
-				}
-				content += fmt.Sprintf("[%s](%s)", att.Title, att.TitleLink)
-			}
-		}
-	}
-
-	// Process files (handle images)
-	var docImages []gdrive.ImageAnnotation
-	if len(msg.Files) > 0 {
-		for _, file := range msg.Files {
-			// If it's an image, try to embed it
-			if strings.HasPrefix(file.Mimetype, "image/") && w.slackClient != nil && w.client != nil {
-				// Download from Slack
-				data, err := w.slackClient.DownloadFile(ctx, file.URLPrivateDownload)
-				if err == nil {
-					// Upload to Drive temporarily
-					fileID, err := w.client.UploadFile(ctx, file.Name, file.Mimetype, data, folderID)
-					if err == nil {
-						// Make public temporarily for Docs API embed, then delete to
-						// prevent private Slack content from remaining publicly accessible.
-						if err := w.client.MakePublic(ctx, fileID); err == nil {
-							// Get web content link
-							url, err := w.client.GetWebContentLink(ctx, fileID)
-							if err == nil {
-								docImages = append(docImages, gdrive.ImageAnnotation{URL: url})
-							}
-							// Delete the temp Drive file regardless of whether we got
-							// the link — the public permission must not persist.
-							_ = w.client.DeleteFile(ctx, fileID)
-						}
-					}
-				}
-			} else {
-				// Non-image file: just add a text reference
-				if content != "" {
-					content += "\n"
-				}
-				content += fmt.Sprintf("[File: %s]", file.Name)
-			}
-		}
-	}
-
-	// Add reactions if present
-	if len(msg.Reactions) > 0 {
+	attText := formatAttachments(msg.Attachments)
+	if attText != "" {
 		if content != "" {
 			content += "\n"
 		}
-		content += "Reactions: "
-		for i, r := range msg.Reactions {
-			if i > 0 {
-				content += " "
-			}
-			content += fmt.Sprintf(":%s: (%d)", r.Name, r.Count)
+		content += attText
+	}
+
+	// Process files (handle images)
+	fileText, docImages := w.processMessageFiles(ctx, msg.Files, folderID)
+	if fileText != "" {
+		if content != "" {
+			content += "\n"
 		}
+		content += fileText
+	}
+
+	// Add reactions if present
+	reactText := formatReactions(msg.Reactions)
+	if reactText != "" {
+		if content != "" {
+			content += "\n"
+		}
+		content += reactText
 	}
 
 	return gdrive.MessageBlock{
@@ -172,6 +131,83 @@ func (w *DocWriter) messageToBlock(ctx context.Context, convID string, folderID 
 		Links:      docLinks,
 		Images:     docImages,
 	}
+}
+
+// formatReactions converts a slice of Slack reactions into a display string.
+// Returns an empty string when there are no reactions.
+func formatReactions(reactions []slackapi.Reaction) string {
+	if len(reactions) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Reactions: ")
+	for i, r := range reactions {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(fmt.Sprintf(":%s: (%d)", r.Name, r.Count))
+	}
+	return b.String()
+}
+
+// formatAttachments converts a slice of Slack attachments into a display string.
+// Returns an empty string when there are no attachments.
+func formatAttachments(attachments []slackapi.Attachment) string {
+	if len(attachments) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, att := range attachments {
+		if att.Text != "" {
+			parts = append(parts, "> "+att.Text)
+		}
+		if att.Title != "" && att.TitleLink != "" {
+			parts = append(parts, fmt.Sprintf("[%s](%s)", att.Title, att.TitleLink))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// processMessageFiles handles file download/upload for images and text references
+// for non-image files. Returns any text to append and image annotations to embed.
+func (w *DocWriter) processMessageFiles(ctx context.Context, files []slackapi.File, folderID string) (string, []gdrive.ImageAnnotation) {
+	if len(files) == 0 {
+		return "", nil
+	}
+
+	var textParts []string
+	var docImages []gdrive.ImageAnnotation
+
+	for _, file := range files {
+		// If it's an image, try to embed it
+		if strings.HasPrefix(file.Mimetype, "image/") && w.slackClient != nil && w.client != nil {
+			// Download from Slack
+			data, err := w.slackClient.DownloadFile(ctx, file.URLPrivateDownload)
+			if err == nil {
+				// Upload to Drive temporarily
+				fileID, err := w.client.UploadFile(ctx, file.Name, file.Mimetype, data, folderID)
+				if err == nil {
+					// Make public temporarily for Docs API embed, then delete to
+					// prevent private Slack content from remaining publicly accessible.
+					if err := w.client.MakePublic(ctx, fileID); err == nil {
+						// Get web content link
+						url, err := w.client.GetWebContentLink(ctx, fileID)
+						if err == nil {
+							docImages = append(docImages, gdrive.ImageAnnotation{URL: url})
+						}
+						// Delete the temp Drive file regardless of whether we got
+						// the link — the public permission must not persist.
+						_ = w.client.DeleteFile(ctx, fileID)
+					}
+				}
+			}
+		} else {
+			// Non-image file: just add a text reference
+			textParts = append(textParts, fmt.Sprintf("[File: %s]", file.Name))
+		}
+	}
+
+	return strings.Join(textParts, "\n"), docImages
 }
 
 // getSenderName returns the display name for a message sender.

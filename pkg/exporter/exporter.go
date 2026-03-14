@@ -182,6 +182,51 @@ func (e *Exporter) LoadUsersForConversations(ctx context.Context, channelIDs []s
 	return nil
 }
 
+// determineExportRange returns the oldest and latest Slack timestamps for
+// the export window based on sync mode, date flags, or defaults (full export).
+func (e *Exporter) determineExportRange(convExport *ConversationExport) (oldest, latest string) {
+	if e.syncMode {
+		if convExport.LastMessageTS != "" {
+			oldest = convExport.LastMessageTS
+			e.Progress("Syncing from last export timestamp: %s", oldest)
+		} else {
+			e.Progress("No previous export found, fetching all messages")
+		}
+		return oldest, latest
+	}
+
+	// Date range mode or full export
+	if e.dateFrom != "" {
+		oldest = e.dateFrom
+	}
+	if e.dateTo != "" {
+		latest = e.dateTo
+	}
+	if oldest != "" || latest != "" {
+		e.Progress("Date range: %s to %s", orDefault(oldest, "beginning"), orDefault(latest, "now"))
+	}
+	return oldest, latest
+}
+
+// exportThreads exports all thread parents found in the message batch and
+// returns the count of threads processed.
+func (e *Exporter) exportThreads(ctx context.Context, convID string, allMessages []slackapi.Message) int {
+	threadParents := GetThreadParents(allMessages)
+	if len(threadParents) == 0 {
+		return 0
+	}
+
+	e.Progress("Exporting %d threads...", len(threadParents))
+	exported := 0
+	for _, parent := range threadParents {
+		if err := e.exportThread(ctx, convID, parent); err != nil {
+			e.Progress("Warning: failed to export thread %s: %v", parent.TS, err)
+		}
+		exported++
+	}
+	return exported
+}
+
 // ExportConversation exports a single conversation to Google Docs.
 func (e *Exporter) ExportConversation(ctx context.Context, conv config.ConversationConfig) (*ExportResult, error) {
 	result := &ExportResult{
@@ -207,29 +252,7 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	convExport.mu.Unlock()
 
 	// Determine oldest/latest bounds
-	oldest := ""
-	latest := ""
-
-	if e.syncMode {
-		// Sync mode: pick up from where we left off
-		if convExport.LastMessageTS != "" {
-			oldest = convExport.LastMessageTS
-			e.Progress("Syncing from last export timestamp: %s", oldest)
-		} else {
-			e.Progress("No previous export found, fetching all messages")
-		}
-	} else {
-		// Date range mode or full export
-		if e.dateFrom != "" {
-			oldest = e.dateFrom
-		}
-		if e.dateTo != "" {
-			latest = e.dateTo
-		}
-		if oldest != "" || latest != "" {
-			e.Progress("Date range: %s to %s", orDefault(oldest, "beginning"), orDefault(latest, "now"))
-		}
-	}
+	oldest, latest := e.determineExportRange(convExport)
 
 	// Fetch all messages
 	e.Progress("Fetching messages...")
@@ -263,16 +286,7 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	dates := SortedDates(messagesByDate)
 
 	// Export threads first so we have links for the daily docs
-	threadParents := GetThreadParents(allMessages)
-	if len(threadParents) > 0 {
-		e.Progress("Exporting %d threads...", len(threadParents))
-		for _, parent := range threadParents {
-			if err := e.exportThread(ctx, conv.ID, parent); err != nil {
-				e.Progress("Warning: failed to export thread %s: %v", parent.TS, err)
-			}
-			result.ThreadsExported++
-		}
-	}
+	result.ThreadsExported = e.exportThreads(ctx, conv.ID, allMessages)
 
 	e.Progress("Writing to %d daily docs...", len(dates))
 
@@ -291,19 +305,18 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 			return result, fmt.Errorf("failed to write messages for %s: %w", date, err)
 		}
 
-		// Update doc stats
-		docExport.MessageCount += len(msgs)
-		if len(msgs) > 0 {
-			docExport.LastMessageTS = msgs[len(msgs)-1].TS
-		}
-
 		result.DocsCreated++
 		result.MessageCount += len(msgs)
 		e.Progress("Wrote %d messages to %s", len(msgs), date)
 
 		// Save checkpoint after each daily doc — hold the per-struct mutex so
 		// the index-level Save() sees a consistent view of this struct's fields.
+		// Save() itself also acquires convExport.mu, so we must release it first.
 		convExport.mu.Lock()
+		docExport.MessageCount += len(msgs)
+		if len(msgs) > 0 {
+			docExport.LastMessageTS = msgs[len(msgs)-1].TS
+		}
 		if len(allMessages) > 0 {
 			convExport.LastMessageTS = allMessages[0].TS
 			convExport.MessageCount += len(msgs)
@@ -448,16 +461,32 @@ func (e *Exporter) ExportAll(ctx context.Context, conversations []config.Convers
 	return results, nil
 }
 
+// clampConcurrency validates and clamps the maxConcurrent parameter to [1, 5].
+func clampConcurrency(maxConcurrent int) int {
+	if maxConcurrent < 1 {
+		return 1
+	}
+	if maxConcurrent > 5 {
+		return 5
+	}
+	return maxConcurrent
+}
+
+// collectParallelResults filters nil entries from a results slice.
+func collectParallelResults(results []*ExportResult) []*ExportResult {
+	var filtered []*ExportResult
+	for _, r := range results {
+		if r != nil {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
 // ExportAllParallel exports conversations concurrently with a max parallelism limit.
 // maxConcurrent controls how many conversations are exported at the same time (1-5).
 func (e *Exporter) ExportAllParallel(ctx context.Context, conversations []config.ConversationConfig, maxConcurrent int) ([]*ExportResult, error) {
-	// Clamp parallelism
-	if maxConcurrent < 1 {
-		maxConcurrent = 1
-	}
-	if maxConcurrent > 5 {
-		maxConcurrent = 5
-	}
+	maxConcurrent = clampConcurrency(maxConcurrent)
 
 	// If parallelism is 1, use the simpler sequential path
 	if maxConcurrent == 1 {
@@ -542,15 +571,7 @@ outer:
 		e.Progress("Resolved %d cross-conversation links", replaced)
 	}
 
-	// Filter nil results (shouldn't happen, but be safe)
-	var finalResults []*ExportResult
-	for _, r := range results {
-		if r != nil {
-			finalResults = append(finalResults, r)
-		}
-	}
-
-	return finalResults, nil
+	return collectParallelResults(results), nil
 }
 
 // ResolveCrossLinks scans all exported docs for remaining Slack message links

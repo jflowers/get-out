@@ -52,11 +52,15 @@ func NewFolderStructure(client *gdrive.Client, index *ExportIndex, cfg *FolderSt
 // Otherwise, it finds or creates a folder by name.
 func (fs *FolderStructure) EnsureRootFolder(ctx context.Context) (*gdrive.FolderInfo, error) {
 	// Check if we already have it in the index
-	if fs.index.RootFolderID != "" {
+	fs.index.mu.RLock()
+	rootID := fs.index.RootFolderID
+	rootURL := fs.index.RootFolderURL
+	fs.index.mu.RUnlock()
+	if rootID != "" {
 		return &gdrive.FolderInfo{
-			ID:   fs.index.RootFolderID,
+			ID:   rootID,
 			Name: fs.rootFolderName,
-			URL:  fs.index.RootFolderURL,
+			URL:  rootURL,
 		}, nil
 	}
 
@@ -68,9 +72,11 @@ func (fs *FolderStructure) EnsureRootFolder(ctx context.Context) (*gdrive.Folder
 			return nil, fmt.Errorf("failed to access folder %s: %w", fs.rootFolderID, err)
 		}
 
-		// Update index with the provided folder
+		// Update index with the provided folder (use mutex to avoid races with concurrent Save)
+		fs.index.mu.Lock()
 		fs.index.RootFolderID = folder.ID
 		fs.index.RootFolderURL = folder.URL
+		fs.index.mu.Unlock()
 
 		return folder, nil
 	}
@@ -81,9 +87,11 @@ func (fs *FolderStructure) EnsureRootFolder(ctx context.Context) (*gdrive.Folder
 		return nil, fmt.Errorf("failed to create root folder: %w", err)
 	}
 
-	// Update index
+	// Update index (use mutex to avoid races with concurrent Save)
+	fs.index.mu.Lock()
 	fs.index.RootFolderID = folder.ID
 	fs.index.RootFolderURL = folder.URL
+	fs.index.mu.Unlock()
 
 	return folder, nil
 }

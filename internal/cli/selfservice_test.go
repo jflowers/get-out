@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jflowers/get-out/pkg/chrome"
 	"github.com/jflowers/get-out/pkg/secrets"
 )
 
@@ -374,6 +375,43 @@ func TestCheckTokenValidity(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// T036: checkDriveAPI tests
+// ---------------------------------------------------------------------------
+
+func TestCheckDriveAPI_NoCredentials(t *testing.T) {
+	t.Parallel()
+	// An empty FileStore has no credentials → ClientFromStore should fail
+	dir := t.TempDir()
+	store := &secrets.FileStore{ConfigDir: dir}
+	var p, w, f int
+	checkDriveAPI(dir, store, &p, &w, &f)
+	if f != 1 || p != 0 {
+		t.Errorf("got pass=%d warn=%d fail=%d, want pass=0 fail=1", p, w, f)
+	}
+}
+
+func TestCheckDriveAPI_BadCredentials(t *testing.T) {
+	t.Parallel()
+	// Invalid credentials JSON → ConfigFromJSON should fail
+	dir := t.TempDir()
+	store := &secrets.FileStore{ConfigDir: dir}
+	if err := store.Set(secrets.KeyClientCredentials, `{"not":"valid oauth"}`); err != nil {
+		t.Fatalf("store.Set: %v", err)
+	}
+	// Also need a token for ClientFromStore to get past credentials parsing
+	tok := tokenStruct{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)}
+	tokJSON, _ := json.Marshal(tok)
+	if err := store.Set(secrets.KeyOAuthToken, string(tokJSON)); err != nil {
+		t.Fatalf("store.Set token: %v", err)
+	}
+	var p, w, f int
+	checkDriveAPI(dir, store, &p, &w, &f)
+	if f != 1 || p != 0 {
+		t.Errorf("got pass=%d warn=%d fail=%d, want pass=0 fail=1", p, w, f)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // T036: checkConversations tests
 // ---------------------------------------------------------------------------
 
@@ -502,6 +540,105 @@ func TestCheckExportIndex(t *testing.T) {
 			t.Errorf("got pass=%d warn=%d fail=%d, want pass=1", p, w, f)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// T037: chromeLaunchCmd tests
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// T036: checkSlackTab tests
+// ---------------------------------------------------------------------------
+
+func TestCheckSlackTab_ConnectionError(t *testing.T) {
+	// Port 0 or an invalid port — chrome.Connect will fail, checkSlackTab
+	// should increment warnCount and return without panicking.
+	var p, w, f int
+	// Use a high port that is almost certainly not listening
+	checkSlackTab(19999, &p, &w, &f)
+	if w != 1 {
+		t.Errorf("got pass=%d warn=%d fail=%d, want warn=1", p, w, f)
+	}
+	if p != 0 || f != 0 {
+		t.Errorf("expected no pass/fail on connection error, got pass=%d fail=%d", p, f)
+	}
+}
+
+func TestCheckSlackTab_DifferentInvalidPorts(t *testing.T) {
+	// Multiple invalid ports to ensure checkSlackTab handles them consistently.
+	for _, port := range []int{19998, 19997, 19996} {
+		var p, w, f int
+		checkSlackTab(port, &p, &w, &f)
+		if w != 1 {
+			t.Errorf("port %d: got warn=%d, want 1", port, w)
+		}
+		if p != 0 || f != 0 {
+			t.Errorf("port %d: got pass=%d fail=%d, want 0", port, p, f)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T036: evalSlackTargets tests (extracted from checkSlackTab for testability)
+// ---------------------------------------------------------------------------
+
+func TestEvalSlackTargets_NoTargets(t *testing.T) {
+	var p, w int
+	evalSlackTargets(nil, &p, &w)
+	if w != 1 || p != 0 {
+		t.Errorf("got pass=%d warn=%d, want pass=0 warn=1", p, w)
+	}
+}
+
+func TestEvalSlackTargets_NoSlackTabs(t *testing.T) {
+	targets := []chrome.TargetInfo{
+		{URL: "https://www.google.com", Type: "page", Title: "Google"},
+		{URL: "https://github.com", Type: "page", Title: "GitHub"},
+	}
+	var p, w int
+	evalSlackTargets(targets, &p, &w)
+	if w != 1 || p != 0 {
+		t.Errorf("got pass=%d warn=%d, want pass=0 warn=1", p, w)
+	}
+}
+
+func TestEvalSlackTargets_OneSlackTab(t *testing.T) {
+	targets := []chrome.TargetInfo{
+		{URL: "https://www.google.com", Type: "page", Title: "Google"},
+		{URL: "https://app.slack.com/client/T123/C456", Type: "page", Title: "Slack"},
+	}
+	var p, w int
+	evalSlackTargets(targets, &p, &w)
+	if p != 1 || w != 0 {
+		t.Errorf("got pass=%d warn=%d, want pass=1 warn=0", p, w)
+	}
+}
+
+func TestEvalSlackTargets_MultipleSlackTabs(t *testing.T) {
+	targets := []chrome.TargetInfo{
+		{URL: "https://app.slack.com/client/T123/C456", Type: "page", Title: "Slack 1"},
+		{URL: "https://myworkspace.slack.com/messages", Type: "page", Title: "Slack 2"},
+	}
+	var p, w int
+	evalSlackTargets(targets, &p, &w)
+	if p != 1 || w != 0 {
+		t.Errorf("got pass=%d warn=%d, want pass=1 warn=0", p, w)
+	}
+}
+
+func TestCheckChrome_NotListening(t *testing.T) {
+	// checkChrome with a port that's not listening — should fail
+	var p, w, f int
+	ok := checkChrome(19999, &p, &w, &f)
+	if ok {
+		t.Error("checkChrome on invalid port should return false")
+	}
+	if f != 1 {
+		t.Errorf("got fail=%d, want 1", f)
+	}
+	if p != 0 {
+		t.Errorf("got pass=%d, want 0", p)
+	}
 }
 
 // ---------------------------------------------------------------------------

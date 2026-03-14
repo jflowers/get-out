@@ -144,51 +144,56 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 }
 
 func runAuthStatus(cmd *cobra.Command, args []string) error {
-	settingsPath := filepath.Join(configDir, "settings.json")
+	return authStatusCore(configDir, secretStore, secretBackend)
+}
+
+// authStatusCore implements the auth status logic and is testable independently.
+func authStatusCore(cfgDir string, store secrets.SecretStore, backend secrets.Backend) error {
+	settingsPath := filepath.Join(cfgDir, "settings.json")
 	settings, err := config.LoadSettings(settingsPath)
 	if err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
 
-	cfg := gdrive.DefaultConfig(configDir)
+	cfg := gdrive.DefaultConfig(cfgDir)
 	if settings.GoogleCredentialsFile != "" {
 		cfg.CredentialsPath = settings.GoogleCredentialsFile
 	}
 
 	// Check 1: credentials in store
-	if _, err := secretStore.Get(secrets.KeyClientCredentials); err == nil {
-		fmt.Printf("Credentials: ✓ found (%s)\n", secretBackend)
+	if _, err := store.Get(secrets.KeyClientCredentials); err == nil {
+		fmt.Printf("Credentials: ✓ found (%s)\n", backend)
 	} else {
 		fmt.Printf("Credentials: ✗ not found\n")
 		fmt.Printf("             → Place credentials.json at %s and run: get-out init\n", cfg.CredentialsPath)
 	}
 
 	// Check 2: token in store
-	if _, err := secretStore.Get(secrets.KeyOAuthToken); err != nil {
+	if _, err := store.Get(secrets.KeyOAuthToken); err != nil {
 		fmt.Printf("Token:       ✗ not found\n")
 		fmt.Println("             → Run: get-out auth login")
 		return fmt.Errorf("not authenticated")
 	}
-	fmt.Printf("Token:       ✓ found (%s)\n", secretBackend)
+	fmt.Printf("Token:       ✓ found (%s)\n", backend)
 
 	// Check 3: token validity + silent refresh
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := gdrive.EnsureTokenFreshWithStore(ctx, cfg, secretStore); err != nil {
+	if err := gdrive.EnsureTokenFreshWithStore(ctx, cfg, store); err != nil {
 		fmt.Println("Token:       ✗ expired and could not be refreshed")
 		fmt.Println("             → Run: get-out auth login")
 		return fmt.Errorf("token expired: %w", err)
 	}
 
 	// Read expiry for display (re-read after potential refresh)
-	token, err := gdrive.LoadTokenFromStore(secretStore)
+	token, err := gdrive.LoadTokenFromStore(store)
 	if err == nil {
 		fmt.Printf("Expiry:      %s\n", token.Expiry.Local().Format("2006-01-02 15:04:05 MST"))
 	}
 
 	// Check 4: Drive API call to get email (use ClientFromStore — no browser flow)
-	httpClient, err := gdrive.ClientFromStore(ctx, cfg, secretStore)
+	httpClient, err := gdrive.ClientFromStore(ctx, cfg, store)
 	if err != nil {
 		fmt.Println("Drive API:   ✗ could not authenticate")
 		return fmt.Errorf("drive authentication failed: %w", err)

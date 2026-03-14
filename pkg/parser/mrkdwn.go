@@ -60,6 +60,47 @@ type LinkAnnotation struct {
 // Google Docs URL, or empty string if the target hasn't been exported.
 type SlackLinkResolver func(channelID, messageTS string) string
 
+// resolveUserMention resolves a single user mention match and returns the
+// display text and optional link annotation.
+func resolveUserMention(matches []string, userResolver *UserResolver, personResolver *PersonResolver) (string, *LinkAnnotation) {
+	userID := matches[1]
+	displayName := ""
+
+	// Use inline display name if present in markup
+	if len(matches) >= 3 && matches[2] != "" {
+		displayName = matches[2]
+	}
+
+	// Try people.json first (primary source)
+	if displayName == "" && personResolver != nil {
+		displayName = personResolver.ResolveName(userID)
+	}
+
+	// Fall back to Slack API cache
+	if displayName == "" && userResolver != nil {
+		displayName = userResolver.Resolve(userID)
+	}
+
+	// Last resort: use raw ID
+	if displayName == "" {
+		displayName = userID
+	}
+
+	mention := "@" + displayName
+
+	// Check for Google email link
+	if personResolver != nil {
+		if email := personResolver.ResolveEmail(userID); email != "" {
+			return mention, &LinkAnnotation{
+				Text: mention,
+				URL:  "mailto:" + email,
+			}
+		}
+	}
+
+	return mention, nil
+}
+
 // ConvertMrkdwnWithLinks converts Slack mrkdwn to plain text and returns link annotations
 // for @mentions that have Google email mappings via the PersonResolver.
 // If slackLinkResolver is non-nil, Slack archive URLs are replaced with Google Docs URLs.
@@ -75,111 +116,65 @@ func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelReso
 	// Replace user mentions — track link annotations for users with Google emails
 	result = userMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := userMentionPattern.FindStringSubmatch(match)
-		if len(matches) >= 2 {
-			userID := matches[1]
-			displayName := ""
-
-			// Use inline display name if present in markup
-			if len(matches) >= 3 && matches[2] != "" {
-				displayName = matches[2]
-			}
-
-			// Try people.json first (primary source)
-			if displayName == "" && personResolver != nil {
-				displayName = personResolver.ResolveName(userID)
-			}
-
-			// Fall back to Slack API cache
-			if displayName == "" && userResolver != nil {
-				displayName = userResolver.Resolve(userID)
-			}
-
-			// Last resort: use raw ID
-			if displayName == "" {
-				displayName = userID
-			}
-
-			mention := "@" + displayName
-
-			// Check for Google email link
-			if personResolver != nil {
-				if email := personResolver.ResolveEmail(userID); email != "" {
-					links = append(links, LinkAnnotation{
-						Text: mention,
-						URL:  "mailto:" + email,
-					})
-				}
-			}
-
-			return mention
+		mention, link := resolveUserMention(matches, userResolver, personResolver)
+		if link != nil {
+			links = append(links, *link)
 		}
-		return match
+		return mention
 	})
 
 	// Replace channel mentions
 	result = channelMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := channelMentionPattern.FindStringSubmatch(match)
-		if len(matches) >= 2 {
-			if len(matches) >= 3 && matches[2] != "" {
-				return "#" + matches[2]
-			}
-			channelID := matches[1]
-			if channelResolver != nil {
-				return "#" + channelResolver.Resolve(channelID)
-			}
-			return "#" + channelID
+		if len(matches) >= 3 && matches[2] != "" {
+			return "#" + matches[2]
 		}
-		return match
+		channelID := matches[1]
+		if channelResolver != nil {
+			return "#" + channelResolver.Resolve(channelID)
+		}
+		return "#" + channelID
 	})
 
 	// Replace URLs with text — track link annotations
 	result = urlWithTextPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := urlWithTextPattern.FindStringSubmatch(match)
-		if len(matches) >= 3 {
-			url := matches[1]
-			displayText := matches[2]
-			links = append(links, LinkAnnotation{
-				Text: displayText,
-				URL:  url,
-			})
-			return displayText
-		}
-		return match
+		url := matches[1]
+		displayText := matches[2]
+		links = append(links, LinkAnnotation{
+			Text: displayText,
+			URL:  url,
+		})
+		return displayText
 	})
 
 	// Replace URLs without text
 	result = urlOnlyPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := urlOnlyPattern.FindStringSubmatch(match)
-		if len(matches) >= 2 {
-			url := matches[1]
-			links = append(links, LinkAnnotation{
-				Text: url,
-				URL:  url,
-			})
-			return url
-		}
-		return match
+		url := matches[1]
+		links = append(links, LinkAnnotation{
+			Text: url,
+			URL:  url,
+		})
+		return url
 	})
 
 	// Replace special mentions
 	result = specialMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
 		matches := specialMentionPattern.FindStringSubmatch(match)
-		if len(matches) >= 2 {
-			switch matches[1] {
-			case "here":
-				return "@here"
-			case "channel":
-				return "@channel"
-			case "everyone":
-				return "@everyone"
-			default:
-				if len(matches) >= 3 && matches[2] != "" {
-					return matches[2]
-				}
-				return "@" + matches[1]
+		switch matches[1] {
+		case "here":
+			return "@here"
+		case "channel":
+			return "@channel"
+		case "everyone":
+			return "@everyone"
+		default:
+			if len(matches) >= 3 && matches[2] != "" {
+				return matches[2]
 			}
+			return "@" + matches[1]
 		}
-		return match
 	})
 
 	// Remove formatting markers but keep text

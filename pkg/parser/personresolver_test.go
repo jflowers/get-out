@@ -110,3 +110,49 @@ func TestNewPersonResolver_NilConfig(t *testing.T) {
 		t.Errorf("Count() = %d, want 0 for nil config", pr.Count())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Contract assertions (Task 8.5)
+// ---------------------------------------------------------------------------
+
+func TestNewPersonResolver_ContractAssertions(t *testing.T) {
+	people := &config.PeopleConfig{
+		People: []config.PersonConfig{
+			{SlackID: "U001", DisplayName: "Alice", GoogleEmail: "alice@example.com"},
+			{SlackID: "U002", DisplayName: "Bob"},
+		},
+	}
+
+	pr := NewPersonResolver(people)
+
+	// Contract: returned resolver is non-nil
+	if pr == nil {
+		t.Fatal("NewPersonResolver returned nil")
+	}
+
+	// Contract: email count reflects only entries with GoogleEmail set
+	if got := pr.Count(); got != 1 {
+		t.Errorf("Count() = %d, want 1", got)
+	}
+
+	// Contract: name count reflects entries with DisplayName set
+	if got := pr.NameCount(); got != 2 {
+		t.Errorf("NameCount() = %d, want 2", got)
+	}
+
+	// Contract: can resolve names and emails by Slack user ID
+	if got := pr.ResolveName("U001"); got != "Alice" {
+		t.Errorf("ResolveName(U001) = %q, want Alice", got)
+	}
+	if got := pr.ResolveEmail("U001"); got != "alice@example.com" {
+		t.Errorf("ResolveEmail(U001) = %q, want alice@example.com", got)
+	}
+
+	// Contract: missing user returns empty string, not error
+	if got := pr.ResolveName("MISSING"); got != "" {
+		t.Errorf("ResolveName(MISSING) = %q, want empty", got)
+	}
+	if got := pr.ResolveEmail("MISSING"); got != "" {
+		t.Errorf("ResolveEmail(MISSING) = %q, want empty", got)
+	}
+}

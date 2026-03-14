@@ -126,6 +126,96 @@ func TestGetThreadParents(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// messageToBlock decomposition integration tests
+// ---------------------------------------------------------------------------
+
+func TestMessageToBlock_Decomposed_BasicDelegation(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	msg := slackapi.Message{
+		User: "U001",
+		Text: "Hello world",
+		TS:   "1706745603.000000",
+	}
+	block := w.messageToBlock(nil, "C123", "folder", msg)
+	if block.SenderName != "U001" {
+		t.Errorf("SenderName = %q, want %q", block.SenderName, "U001")
+	}
+	if block.Content != "Hello world" {
+		t.Errorf("Content = %q, want %q", block.Content, "Hello world")
+	}
+}
+
+func TestMessageToBlock_Decomposed_AllSections(t *testing.T) {
+	// Message with text, attachments, files, and reactions all at once
+	// Verifies the decomposed helpers integrate correctly.
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	msg := slackapi.Message{
+		User: "U001",
+		Text: "Main text",
+		TS:   "1706745603.000000",
+		Attachments: []slackapi.Attachment{
+			{Text: "Attached"},
+		},
+		Files: []slackapi.File{
+			{Name: "doc.pdf", Mimetype: "application/pdf"},
+		},
+		Reactions: []slackapi.Reaction{
+			{Name: "heart", Count: 1},
+		},
+	}
+	block := w.messageToBlock(nil, "C123", "folder", msg)
+	want := "Main text\n> Attached\n[File: doc.pdf]\nReactions: :heart: (1)"
+	if block.Content != want {
+		t.Errorf("Content = %q, want %q", block.Content, want)
+	}
+}
+
+func TestMessageToBlock_Decomposed_ReactionsOnly(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	msg := slackapi.Message{
+		User: "U001",
+		TS:   "1706745603.000000",
+		Reactions: []slackapi.Reaction{
+			{Name: "thumbsup", Count: 2},
+		},
+	}
+	block := w.messageToBlock(nil, "C123", "folder", msg)
+	if block.Content != "Reactions: :thumbsup: (2)" {
+		t.Errorf("Content = %q", block.Content)
+	}
+}
+
+func TestMessageToBlock_Decomposed_AttachmentsOnly(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	msg := slackapi.Message{
+		User: "U001",
+		TS:   "1706745603.000000",
+		Attachments: []slackapi.Attachment{
+			{Text: "Standalone attachment"},
+		},
+	}
+	block := w.messageToBlock(nil, "C123", "folder", msg)
+	if block.Content != "> Standalone attachment" {
+		t.Errorf("Content = %q", block.Content)
+	}
+}
+
+func TestMessageToBlock_Decomposed_FilesOnly(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	msg := slackapi.Message{
+		User: "U001",
+		TS:   "1706745603.000000",
+		Files: []slackapi.File{
+			{Name: "report.pdf", Mimetype: "application/pdf"},
+		},
+	}
+	block := w.messageToBlock(nil, "C123", "folder", msg)
+	if block.Content != "[File: report.pdf]" {
+		t.Errorf("Content = %q", block.Content)
+	}
+}
+
 func TestGetSenderName(t *testing.T) {
 	resolver := parser.NewUserResolver()
 	resolver.AddUser(&slackapi.User{
@@ -210,6 +300,202 @@ func TestGetSenderName(t *testing.T) {
 				t.Errorf("getSenderName() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatReactions tests
+// ---------------------------------------------------------------------------
+
+func TestFormatReactions(t *testing.T) {
+	tests := []struct {
+		name      string
+		reactions []slackapi.Reaction
+		want      string
+	}{
+		{
+			name:      "nil reactions",
+			reactions: nil,
+			want:      "",
+		},
+		{
+			name:      "empty reactions",
+			reactions: []slackapi.Reaction{},
+			want:      "",
+		},
+		{
+			name: "single reaction",
+			reactions: []slackapi.Reaction{
+				{Name: "thumbsup", Count: 3},
+			},
+			want: "Reactions: :thumbsup: (3)",
+		},
+		{
+			name: "multiple reactions",
+			reactions: []slackapi.Reaction{
+				{Name: "thumbsup", Count: 3},
+				{Name: "heart", Count: 1},
+				{Name: "fire", Count: 5},
+			},
+			want: "Reactions: :thumbsup: (3) :heart: (1) :fire: (5)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatReactions(tt.reactions)
+			if got != tt.want {
+				t.Errorf("formatReactions() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// formatAttachments tests
+// ---------------------------------------------------------------------------
+
+func TestFormatAttachments(t *testing.T) {
+	tests := []struct {
+		name        string
+		attachments []slackapi.Attachment
+		want        string
+	}{
+		{
+			name:        "nil attachments",
+			attachments: nil,
+			want:        "",
+		},
+		{
+			name:        "empty attachments",
+			attachments: []slackapi.Attachment{},
+			want:        "",
+		},
+		{
+			name: "attachment with text only",
+			attachments: []slackapi.Attachment{
+				{Text: "Some attachment text"},
+			},
+			want: "> Some attachment text",
+		},
+		{
+			name: "attachment with title and link only",
+			attachments: []slackapi.Attachment{
+				{Title: "My Link", TitleLink: "https://example.com"},
+			},
+			want: "[My Link](https://example.com)",
+		},
+		{
+			name: "attachment with both text and title link",
+			attachments: []slackapi.Attachment{
+				{Text: "Description", Title: "My Link", TitleLink: "https://example.com"},
+			},
+			want: "> Description\n[My Link](https://example.com)",
+		},
+		{
+			name: "attachment with title but no link is ignored",
+			attachments: []slackapi.Attachment{
+				{Title: "Title Only"},
+			},
+			want: "",
+		},
+		{
+			name: "multiple attachments",
+			attachments: []slackapi.Attachment{
+				{Text: "First"},
+				{Text: "Second", Title: "Link", TitleLink: "https://example.com"},
+			},
+			want: "> First\n> Second\n[Link](https://example.com)",
+		},
+		{
+			name: "attachment with empty text and empty title",
+			attachments: []slackapi.Attachment{
+				{Color: "green"}, // no text, no title
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatAttachments(tt.attachments)
+			if got != tt.want {
+				t.Errorf("formatAttachments() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// processMessageFiles tests
+// ---------------------------------------------------------------------------
+
+func TestProcessMessageFiles_NoFiles(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	text, images := w.processMessageFiles(nil, nil, "folder123")
+	if text != "" {
+		t.Errorf("expected empty text, got %q", text)
+	}
+	if len(images) != 0 {
+		t.Errorf("expected no images, got %d", len(images))
+	}
+}
+
+func TestProcessMessageFiles_EmptyFiles(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	text, images := w.processMessageFiles(nil, []slackapi.File{}, "folder123")
+	if text != "" {
+		t.Errorf("expected empty text, got %q", text)
+	}
+	if len(images) != 0 {
+		t.Errorf("expected no images, got %d", len(images))
+	}
+}
+
+func TestProcessMessageFiles_NonImageFiles(t *testing.T) {
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	files := []slackapi.File{
+		{Name: "report.pdf", Mimetype: "application/pdf"},
+		{Name: "data.csv", Mimetype: "text/csv"},
+	}
+	text, images := w.processMessageFiles(nil, files, "folder123")
+	if text != "[File: report.pdf]\n[File: data.csv]" {
+		t.Errorf("got text %q, want %q", text, "[File: report.pdf]\n[File: data.csv]")
+	}
+	if len(images) != 0 {
+		t.Errorf("expected no images for non-image files, got %d", len(images))
+	}
+}
+
+func TestProcessMessageFiles_ImageWithoutClients(t *testing.T) {
+	// Image file but no slackClient/gdrive client — falls through to non-image path
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	files := []slackapi.File{
+		{Name: "photo.png", Mimetype: "image/png"},
+	}
+	text, images := w.processMessageFiles(nil, files, "folder123")
+	if text != "[File: photo.png]" {
+		t.Errorf("got text %q, want %q", text, "[File: photo.png]")
+	}
+	if len(images) != 0 {
+		t.Errorf("expected no images without clients, got %d", len(images))
+	}
+}
+
+func TestProcessMessageFiles_MixedFiles(t *testing.T) {
+	// Mix of image (no clients) and non-image files
+	w := NewDocWriter(nil, nil, nil, nil, nil, nil, nil)
+	files := []slackapi.File{
+		{Name: "photo.png", Mimetype: "image/png"},
+		{Name: "doc.txt", Mimetype: "text/plain"},
+	}
+	text, images := w.processMessageFiles(nil, files, "folder123")
+	// Both should appear as text refs since there are no clients
+	if text != "[File: photo.png]\n[File: doc.txt]" {
+		t.Errorf("got text %q, want %q", text, "[File: photo.png]\n[File: doc.txt]")
+	}
+	if len(images) != 0 {
+		t.Errorf("expected no images, got %d", len(images))
 	}
 }
 
