@@ -411,9 +411,10 @@ func TestFormatTimestampFull(t *testing.T) {
 	if !strings.Contains(got, "2024") {
 		t.Errorf("FormatTimestampFull() = %q, expected to contain year 2024", got)
 	}
-	// Contract assertion: must contain "Jan" (the month for this timestamp)
-	if !strings.Contains(got, "Jan") {
-		t.Errorf("FormatTimestampFull() = %q, expected to contain month Jan", got)
+	// Contract assertion: must contain the month — Jan or Feb depending on timezone
+	// 1706745603 = 2024-02-01 00:00:03 UTC = 2024-01-31 in US timezones
+	if !strings.Contains(got, "Jan") && !strings.Contains(got, "Feb") {
+		t.Errorf("FormatTimestampFull() = %q, expected to contain month Jan or Feb", got)
 	}
 	// Contract assertion: format is "Jan D, YYYY H:MM PM" — must contain comma
 	if !strings.Contains(got, ",") {
