@@ -425,3 +425,142 @@ func TestEnsureTokenFreshWithStore_NoRefreshToken_ErrorMessage(t *testing.T) {
 		t.Errorf("error %q should contain 'auth login'", err.Error())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Contract assertion tests (Group 8.2-8.4)
+// ---------------------------------------------------------------------------
+
+// TestClientFromStore_ValidToken_ContractAssertions verifies the returned
+// http.Client has a transport configured (not the default zero-value).
+func TestClientFromStore_ValidToken_ContractAssertions(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeCredentials(t, store)
+	writeToken(t, store, map[string]any{
+		"access_token": "ya29.contract-test",
+		"expiry":       time.Now().Add(time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	client, err := ClientFromStore(ctx, cfg, store)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("returned nil client")
+	}
+	// The oauth2 transport wraps http.DefaultTransport; verify it's set.
+	if client.Transport == nil {
+		t.Error("client.Transport is nil; expected oauth2 transport")
+	}
+}
+
+// TestAuthenticateWithStore_ValidToken_ContractAssertions verifies the returned
+// http.Client has a configured transport.
+func TestAuthenticateWithStore_ValidToken_ContractAssertions(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeCredentials(t, store)
+	writeToken(t, store, map[string]any{
+		"access_token": "ya29.contract-test",
+		"expiry":       time.Now().Add(time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	client, err := AuthenticateWithStore(ctx, cfg, store)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("returned nil client")
+	}
+	if client.Transport == nil {
+		t.Error("client.Transport is nil; expected oauth2 transport")
+	}
+}
+
+// TestEnsureTokenFreshWithStore_ValidToken_ContractAssertions verifies that
+// a valid token returns nil error (the contract: no error = token is fresh)
+// and that re-reading the token confirms it is still valid.
+func TestEnsureTokenFreshWithStore_ValidToken_ContractAssertions(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeToken(t, store, map[string]any{
+		"access_token": "ya29.fresh",
+		"expiry":       time.Now().Add(time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	err := EnsureTokenFreshWithStore(ctx, cfg, store)
+	if err != nil {
+		t.Errorf("EnsureTokenFreshWithStore with fresh token returned error: %v", err)
+	}
+
+	// Re-read the token from the store to verify it remains valid (freshness contract).
+	token, err := LoadTokenFromStore(store)
+	if err != nil {
+		t.Fatalf("LoadTokenFromStore after EnsureTokenFresh: %v", err)
+	}
+	if !token.Valid() {
+		t.Error("token.Valid() = false after EnsureTokenFreshWithStore; expected true")
+	}
+	if token.AccessToken != "ya29.fresh" {
+		t.Errorf("AccessToken = %q, want ya29.fresh", token.AccessToken)
+	}
+}
+
+// TestLoadTokenFromStore_ContractAssertions verifies returned token fields.
+func TestLoadTokenFromStore_ContractAssertions(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+
+	expiry := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	writeToken(t, store, map[string]any{
+		"access_token":  "ya29.contract",
+		"refresh_token": "1//contract",
+		"token_type":    "Bearer",
+		"expiry":        expiry.Format(time.RFC3339),
+	})
+
+	token, err := LoadTokenFromStore(store)
+	if err != nil {
+		t.Fatalf("LoadTokenFromStore: %v", err)
+	}
+
+	if token.AccessToken != "ya29.contract" {
+		t.Errorf("AccessToken = %q, want ya29.contract", token.AccessToken)
+	}
+	if token.RefreshToken != "1//contract" {
+		t.Errorf("RefreshToken = %q, want 1//contract", token.RefreshToken)
+	}
+	if token.TokenType != "Bearer" {
+		t.Errorf("TokenType = %q, want Bearer", token.TokenType)
+	}
+	if !token.Valid() {
+		t.Error("token.Valid() = false, expected true for future expiry")
+	}
+}
+
+// TestClientFromStore_ExpiredNoRefresh_ErrorMessage verifies the actionable message.
+func TestClientFromStore_ExpiredNoRefresh_ErrorMessage(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeCredentials(t, store)
+	writeToken(t, store, map[string]any{
+		"access_token": "ya29.expired",
+		"expiry":       time.Now().Add(-time.Hour).Format(time.RFC3339),
+	})
+	cfg := &Config{}
+	ctx := context.Background()
+
+	_, err := ClientFromStore(ctx, cfg, store)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "auth login") {
+		t.Errorf("error %q should contain 'auth login' hint", err.Error())
+	}
+}

@@ -188,7 +188,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 	// Fetch user info for each member
 	fmt.Println("\nFetching user profiles...")
-	var people []config.PersonConfig
+	var fetchedUsers []*slackapi.User
 	fetched := 0
 	skipped := 0
 
@@ -209,22 +209,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Skip bots and app users
-		if user.IsBot || user.IsAppUser {
-			continue
-		}
-
-		// Skip deleted users
-		if user.Deleted {
-			continue
-		}
-
-		person := config.PersonConfig{
-			SlackID:     user.ID,
-			Email:       user.Profile.Email,
-			DisplayName: user.GetDisplayName(),
-		}
-		people = append(people, person)
+		fetchedUsers = append(fetchedUsers, user)
 		fetched++
 
 		if fetched%25 == 0 {
@@ -245,12 +230,17 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	// Convert fetched users to PersonConfig entries, filtering bots/deleted
+	newPeople := buildPeopleFromUsers(fetchedUsers)
+
 	// Merge with existing if needed
-	if merge && len(existingPeople) > 0 {
+	var existingList []config.PersonConfig
+	if merge {
 		for _, p := range existingPeople {
-			people = append(people, p)
+			existingList = append(existingList, p)
 		}
 	}
+	people := mergePeople(newPeople, existingList)
 
 	// Write people.json
 	peopleCfg := config.PeopleConfig{People: people}
@@ -266,4 +256,42 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\nWrote %d people to %s\n", len(people), peoplePath)
 
 	return nil
+}
+
+// buildPeopleFromUsers converts Slack user info to PersonConfig entries,
+// filtering out bots, app users, and deleted users.
+func buildPeopleFromUsers(users []*slackapi.User) []config.PersonConfig {
+	var people []config.PersonConfig
+	for _, user := range users {
+		if user.IsBot || user.IsAppUser || user.Deleted {
+			continue
+		}
+		people = append(people, config.PersonConfig{
+			SlackID:     user.ID,
+			Email:       user.Profile.Email,
+			DisplayName: user.GetDisplayName(),
+		})
+	}
+	return people
+}
+
+// mergePeople merges newPeople with existingPeople. Existing entries are kept
+// as-is (not overwritten).
+func mergePeople(newPeople, existingPeople []config.PersonConfig) []config.PersonConfig {
+	existing := make(map[string]config.PersonConfig)
+	for _, p := range existingPeople {
+		existing[p.SlackID] = p
+	}
+	var result []config.PersonConfig
+	// Add all existing first
+	for _, p := range existingPeople {
+		result = append(result, p)
+	}
+	// Add new ones that aren't already present
+	for _, p := range newPeople {
+		if _, exists := existing[p.SlackID]; !exists {
+			result = append(result, p)
+		}
+	}
+	return result
 }

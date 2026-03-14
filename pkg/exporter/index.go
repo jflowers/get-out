@@ -150,15 +150,32 @@ func (idx *ExportIndex) Save() error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
+	// Lock all per-conversation mutexes so json.MarshalIndent reads a
+	// consistent snapshot.  Concurrent ExportConversation goroutines
+	// write DocExport / ConversationExport fields under their own mu,
+	// so we must hold those locks during serialization.
+	for _, conv := range idx.Conversations {
+		conv.mu.Lock()
+	}
+
 	idx.UpdatedAt = time.Now()
 
 	// Ensure directory exists
 	dir := filepath.Dir(idx.path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
+		for _, conv := range idx.Conversations {
+			conv.mu.Unlock()
+		}
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	data, err := json.MarshalIndent(idx, "", "  ")
+
+	// Unlock all conversation mutexes now that serialization is done.
+	for _, conv := range idx.Conversations {
+		conv.mu.Unlock()
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal export index: %w", err)
 	}

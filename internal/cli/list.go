@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/jflowers/get-out/pkg/config"
@@ -31,30 +33,34 @@ func init() {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	// Load conversations config
 	configPath := filepath.Join(configDir, "conversations.json")
 	cfg, err := config.LoadConversations(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+	listCore(os.Stdout, cfg.FilterByExport(), listType, listMode)
+	return nil
+}
 
+// listCore formats and writes the conversation list to w.
+// It filters by typeFilter and modeFilter (empty string means no filter),
+// groups results by conversation type, and writes formatted output.
+func listCore(w io.Writer, conversations []config.ConversationConfig, typeFilter, modeFilter string) {
 	// Apply filters
-	conversations := cfg.FilterByExport()
-
-	if listType != "" {
+	if typeFilter != "" {
 		var filtered []config.ConversationConfig
 		for _, c := range conversations {
-			if string(c.Type) == listType {
+			if string(c.Type) == typeFilter {
 				filtered = append(filtered, c)
 			}
 		}
 		conversations = filtered
 	}
 
-	if listMode != "" {
+	if modeFilter != "" {
 		var filtered []config.ConversationConfig
 		for _, c := range conversations {
-			if string(c.Mode) == listMode {
+			if string(c.Mode) == modeFilter {
 				filtered = append(filtered, c)
 			}
 		}
@@ -62,7 +68,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display results
-	fmt.Printf("Configured conversations (%d total):\n\n", len(conversations))
+	fmt.Fprintf(w, "Configured conversations (%d total):\n\n", len(conversations))
 
 	// Group by type
 	byType := make(map[models.ConversationType][]config.ConversationConfig)
@@ -90,7 +96,7 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fmt.Printf("%s (%d):\n", typeNames[t], len(convs))
+		fmt.Fprintf(w, "%s (%d):\n", typeNames[t], len(convs))
 		for _, c := range convs {
 			modeStr := "API"
 			if c.Mode == models.ExportModeBrowser {
@@ -100,10 +106,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			if c.Share {
 				shareStr = " [share]"
 			}
-			fmt.Printf("  %-12s %-30s [%s]%s\n", c.ID, c.Name, modeStr, shareStr)
+			fmt.Fprintf(w, "  %-12s %-30s [%s]%s\n", c.ID, c.Name, modeStr, shareStr)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
-
-	return nil
 }

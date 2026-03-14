@@ -9,6 +9,15 @@ import (
 	"github.com/jflowers/get-out/pkg/slackapi"
 )
 
+// SlackAPI is the subset of the Slack API client needed by the resolver functions.
+// It is satisfied by *slackapi.Client.
+type SlackAPI interface {
+	GetUsers(ctx context.Context, cursor string) (*slackapi.UsersListResponse, error)
+	GetConversationMembers(ctx context.Context, channelID, cursor string) (*slackapi.MembersResponse, error)
+	GetUserInfo(ctx context.Context, userID string) (*slackapi.User, error)
+	ListConversations(ctx context.Context, opts *slackapi.ListConversationsOptions) (*slackapi.ConversationsListResponse, error)
+}
+
 // UserResolver resolves Slack user IDs to display names.
 type UserResolver struct {
 	mu    sync.RWMutex
@@ -24,7 +33,7 @@ func NewUserResolver() *UserResolver {
 
 // LoadUsers fetches all users from Slack and caches them.
 // The optional onProgress callback is called after each batch with current count.
-func (r *UserResolver) LoadUsers(ctx context.Context, client *slackapi.Client, onProgress ...func(int)) error {
+func (r *UserResolver) LoadUsers(ctx context.Context, client SlackAPI, onProgress ...func(int)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -65,10 +74,44 @@ func (r *UserResolver) LoadUsers(ctx context.Context, client *slackapi.Client, o
 	return nil
 }
 
+// fetchConversationMembers fetches all member IDs for a single conversation,
+// handling pagination and throttling. It adds members to memberSet. If the
+// conversation is inaccessible, it reports via progressFn and returns nil.
+func fetchConversationMembers(ctx context.Context, client SlackAPI, channelID string, memberSet map[string]bool, progressFn func(string, int)) error {
+	cursor := ""
+	for {
+		resp, err := client.GetConversationMembers(ctx, channelID, cursor)
+		if err != nil {
+			// Some conversations might not be accessible; log and continue
+			if progressFn != nil {
+				progressFn(channelID, -1)
+			}
+			return nil
+		}
+
+		for _, memberID := range resp.Members {
+			memberSet[memberID] = true
+		}
+
+		if resp.ResponseMetadata.NextCursor == "" {
+			break
+		}
+		cursor = resp.ResponseMetadata.NextCursor
+
+		// Throttle between pages
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
 // LoadUsersForConversations loads users who are members of the specified conversations.
 // This is much faster than LoadUsers for large workspaces since it only fetches
 // users in the conversations being exported.
-func (r *UserResolver) LoadUsersForConversations(ctx context.Context, client *slackapi.Client, channelIDs []string, onProgress ...func(string, int)) error {
+func (r *UserResolver) LoadUsersForConversations(ctx context.Context, client SlackAPI, channelIDs []string, onProgress ...func(string, int)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -80,32 +123,8 @@ func (r *UserResolver) LoadUsersForConversations(ctx context.Context, client *sl
 	// Collect unique member IDs across all conversations
 	memberSet := make(map[string]bool)
 	for _, channelID := range channelIDs {
-		cursor := ""
-		for {
-			resp, err := client.GetConversationMembers(ctx, channelID, cursor)
-			if err != nil {
-				// Some conversations might not be accessible; log and continue
-				if progressFn != nil {
-					progressFn(channelID, -1)
-				}
-				break
-			}
-
-			for _, memberID := range resp.Members {
-				memberSet[memberID] = true
-			}
-
-			if resp.ResponseMetadata.NextCursor == "" {
-				break
-			}
-			cursor = resp.ResponseMetadata.NextCursor
-
-			// Throttle between pages
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(500 * time.Millisecond):
-			}
+		if err := fetchConversationMembers(ctx, client, channelID, memberSet, progressFn); err != nil {
+			return err
 		}
 
 		if progressFn != nil {
@@ -176,7 +195,7 @@ func (r *UserResolver) Resolve(id string) string {
 }
 
 // ResolveWithFallback returns the display name, or fetches it from Slack if not cached.
-func (r *UserResolver) ResolveWithFallback(ctx context.Context, client *slackapi.Client, id string) string {
+func (r *UserResolver) ResolveWithFallback(ctx context.Context, client SlackAPI, id string) string {
 	// Check cache first
 	r.mu.RLock()
 	if user, ok := r.users[id]; ok {
@@ -233,7 +252,7 @@ func (r *ChannelResolver) Resolve(id string) string {
 }
 
 // LoadChannels fetches channels from Slack.
-func (r *ChannelResolver) LoadChannels(ctx context.Context, client *slackapi.Client) error {
+func (r *ChannelResolver) LoadChannels(ctx context.Context, client SlackAPI) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

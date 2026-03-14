@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/jflowers/get-out/pkg/exporter"
@@ -23,33 +25,37 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	// Load export index
 	indexPath := exporter.DefaultIndexPath(configDir)
 	index, err := exporter.LoadExportIndex(indexPath)
 	if err != nil {
 		return fmt.Errorf("failed to load export index: %w", err)
 	}
+	statusCore(os.Stdout, index)
+	return nil
+}
 
+// statusCore formats and writes export status to w.
+// Returns (totalConversations, completeCount) for summary.
+func statusCore(w io.Writer, index *exporter.ExportIndex) (int, int) {
 	convs := index.AllConversations()
 	if len(convs) == 0 {
-		fmt.Println("No exports found. Run 'get-out export' to start exporting.")
-		return nil
+		fmt.Fprintln(w, "No exports found. Run 'get-out export' to start exporting.")
+		return 0, 0
 	}
 
 	// Header
 	if index.RootFolderURL != "" {
-		fmt.Printf("Root folder: %s\n", index.RootFolderURL)
+		fmt.Fprintf(w, "Root folder: %s\n", index.RootFolderURL)
 	}
-	fmt.Printf("Last updated: %s\n", index.UpdatedAt.Format(time.RFC3339))
-	fmt.Printf("\nExported conversations (%d):\n\n", len(convs))
+	fmt.Fprintf(w, "Last updated: %s\n", index.UpdatedAt.Format(time.RFC3339))
+	fmt.Fprintf(w, "\nExported conversations (%d):\n\n", len(convs))
 
 	// Table header
-	fmt.Printf("  %-10s %-8s %-30s %6s %5s %5s  %s\n",
+	fmt.Fprintf(w, "  %-10s %-8s %-30s %6s %5s %5s  %s\n",
 		"STATUS", "TYPE", "NAME", "MSGS", "DOCS", "THRDS", "LAST UPDATED")
-	fmt.Printf("  %-10s %-8s %-30s %6s %5s %5s  %s\n",
+	fmt.Fprintf(w, "  %-10s %-8s %-30s %6s %5s %5s  %s\n",
 		"──────────", "────────", "──────────────────────────────", "──────", "─────", "─────", "────────────")
 
-	// Sort by name for consistent output
 	totalMsgs := 0
 	totalDocs := 0
 	totalThreads := 0
@@ -81,7 +87,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			name = name[:27] + "..."
 		}
 
-		fmt.Printf("  %s %-8s %-8s %-30s %6d %5d %5d  %s\n",
+		fmt.Fprintf(w, "  %s %-8s %-8s %-30s %6d %5d %5d  %s\n",
 			statusIcon, status, conv.Type, name, conv.MessageCount, docCount, threadCount, lastUpdated)
 
 		totalMsgs += conv.MessageCount
@@ -89,8 +95,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		totalThreads += threadCount
 	}
 
-	fmt.Printf("\nSummary: %d conversations (%d complete), %d messages, %d docs, %d threads\n",
+	fmt.Fprintf(w, "\nSummary: %d conversations (%d complete), %d messages, %d docs, %d threads\n",
 		len(convs), complete, totalMsgs, totalDocs, totalThreads)
 
-	return nil
+	return len(convs), complete
 }

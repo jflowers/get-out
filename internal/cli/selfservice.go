@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -88,21 +89,55 @@ var sensitiveFiles = map[string]bool{
 	"token.json":       true,
 }
 
+// scaffoldConfigDir creates the config directory and starter files if they
+// don't already exist. It returns the names of files that were created.
+func scaffoldConfigDir(dir string) (created []string, err error) {
+	// Check if exists and is a dir.
+	info, err := os.Stat(dir)
+	if err == nil && !info.IsDir() {
+		return nil, fmt.Errorf("%s exists but is not a directory", dir)
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to stat config dir: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create config dir: %w", err)
+	}
+
+	// Create starter conversations.json if absent.
+	convPath := filepath.Join(dir, "conversations.json")
+	if _, err := os.Stat(convPath); os.IsNotExist(err) {
+		template := []byte(`{"conversations":[]}` + "\n")
+		if err := os.WriteFile(convPath, template, 0644); err != nil {
+			return nil, fmt.Errorf("failed to create conversations.json: %w", err)
+		}
+		created = append(created, "conversations.json")
+	}
+
+	// Create starter settings.json if absent.
+	settingsPath := filepath.Join(dir, "settings.json")
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		if err := os.WriteFile(settingsPath, []byte("{}\n"), 0600); err != nil {
+			return nil, fmt.Errorf("failed to create settings.json: %w", err)
+		}
+		created = append(created, "settings.json")
+	}
+
+	return created, nil
+}
+
 func runInit(cmd *cobra.Command, args []string) error {
 	newDir := configDir
 
-	// Step 1: Create config directory.
-	info, err := os.Stat(newDir)
-	if err == nil && !info.IsDir() {
-		return fmt.Errorf("%s exists but is not a directory", newDir)
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to stat config dir: %w", err)
-	}
-	if err := os.MkdirAll(newDir, 0700); err != nil {
-		return fmt.Errorf("failed to create config dir: %w", err)
+	// Step 1 + 3 + 4: Create config directory and starter files.
+	created, err := scaffoldConfigDir(newDir)
+	if err != nil {
+		return err
 	}
 	fmt.Printf("Config directory: %s\n", newDir)
+	for _, name := range created {
+		fmt.Printf("Created %s template.\n", name)
+	}
 
 	// Step 2: Migration from old directory.
 	home, _ := os.UserHomeDir()
@@ -117,24 +152,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Step 3: Create starter conversations.json if absent.
-	convPath := filepath.Join(newDir, "conversations.json")
-	if _, err := os.Stat(convPath); os.IsNotExist(err) {
-		template := []byte(`{"conversations":[]}` + "\n")
-		if err := os.WriteFile(convPath, template, 0644); err != nil {
-			return fmt.Errorf("failed to create conversations.json: %w", err)
-		}
-		fmt.Println("Created conversations.json template.")
-	}
-
-	// Step 4: Create starter settings.json if absent.
+	// Re-resolve settings path for subsequent steps.
 	settingsPath := filepath.Join(newDir, "settings.json")
-	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
-		if err := os.WriteFile(settingsPath, []byte("{}\n"), 0600); err != nil {
-			return fmt.Errorf("failed to create settings.json: %w", err)
-		}
-		fmt.Println("Created settings.json template.")
-	}
 
 	// Step 5: Prompt for folder ID.
 	settings, err := config.LoadSettings(settingsPath)
@@ -363,22 +382,27 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println()
-	fmt.Println("─────────────────────────────────────────")
-	summary := fmt.Sprintf("  %d passed · %d warnings · %d failures", passCount, warnCount, failCount)
-	if failCount > 0 {
-		fmt.Println(failStyle.Render(summary))
-	} else if warnCount > 0 {
-		fmt.Println(warnStyle.Render(summary))
-	} else {
-		fmt.Println(passStyle.Render(summary))
-	}
-	fmt.Println("─────────────────────────────────────────")
+	formatDoctorSummary(os.Stdout, passCount, warnCount, failCount)
 
 	if failCount > 0 {
 		os.Exit(1)
 	}
 	return nil
+}
+
+// formatDoctorSummary writes the doctor check summary line to w.
+func formatDoctorSummary(w io.Writer, pass, warn, fail int) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "─────────────────────────────────────────")
+	summary := fmt.Sprintf("  %d passed · %d warnings · %d failures", pass, warn, fail)
+	if fail > 0 {
+		fmt.Fprintln(w, failStyle.Render(summary))
+	} else if warn > 0 {
+		fmt.Fprintln(w, warnStyle.Render(summary))
+	} else {
+		fmt.Fprintln(w, passStyle.Render(summary))
+	}
+	fmt.Fprintln(w, "─────────────────────────────────────────")
 }
 
 // checkConfigDir checks check 1 — config directory existence, permissions, and secret backend.
@@ -567,6 +591,12 @@ func checkSlackTab(port int, pass_, warn_, fail_ *int) {
 		return
 	}
 
+	evalSlackTargets(targets, pass_, warn_)
+}
+
+// evalSlackTargets evaluates Chrome targets for Slack tabs.
+// Extracted from checkSlackTab for testability without a real Chrome connection.
+func evalSlackTargets(targets []chrome.TargetInfo, pass_, warn_ *int) {
 	var slackCount int
 	for _, t := range targets {
 		if chrome.IsSlackURL(t.URL) {
