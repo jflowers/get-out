@@ -180,9 +180,12 @@ func TestEnsureRootFolder_WithRootFolderID_Error(t *testing.T) {
 		RootFolderID: "bad-id",
 	})
 
-	_, err := fs.EnsureRootFolder(context.Background())
+	folder, err := fs.EnsureRootFolder(context.Background())
 	if err == nil {
 		t.Fatal("expected error for non-existent folder, got nil")
+	}
+	if folder != nil {
+		t.Error("expected nil folder on error")
 	}
 }
 
@@ -472,9 +475,12 @@ func TestEnsureThreadsFolder_ConversationNotInIndex(t *testing.T) {
 	c := testGdriveClient(t, http.NewServeMux())
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureThreadsFolder(context.Background(), "C999")
+	id, err := fs.EnsureThreadsFolder(context.Background(), "C999")
 	if err == nil {
 		t.Fatal("expected error for missing conversation, got nil")
+	}
+	if id != "" {
+		t.Error("expected empty id on error")
 	}
 }
 
@@ -641,9 +647,12 @@ func TestEnsureThreadFolder_ConversationNotInIndex(t *testing.T) {
 	c := testGdriveClient(t, http.NewServeMux())
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureThreadFolder(context.Background(), "C999", "1700000000.000100", "topic")
+	thread, err := fs.EnsureThreadFolder(context.Background(), "C999", "1700000000.000100", "topic")
 	if err == nil {
 		t.Fatal("expected error for missing conversation")
+	}
+	if thread != nil {
+		t.Error("expected nil thread on error")
 	}
 }
 
@@ -739,9 +748,12 @@ func TestEnsureDailyDoc_ConversationNotInIndex(t *testing.T) {
 	c := testGdriveClient(t, http.NewServeMux())
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureDailyDoc(context.Background(), "C999", "2026-03-14")
+	doc, err := fs.EnsureDailyDoc(context.Background(), "C999", "2026-03-14")
 	if err == nil {
 		t.Fatal("expected error for missing conversation")
+	}
+	if doc != nil {
+		t.Error("expected nil doc on error")
 	}
 }
 
@@ -782,9 +794,12 @@ func TestEnsureThreadDailyDoc_ThreadNotInIndex(t *testing.T) {
 	c := testGdriveClient(t, http.NewServeMux())
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureThreadDailyDoc(context.Background(), "C001", "1700000000.000100", "2023-11-14")
+	doc, err := fs.EnsureThreadDailyDoc(context.Background(), "C001", "1700000000.000100", "2023-11-14")
 	if err == nil {
 		t.Fatal("expected error for missing thread")
+	}
+	if doc != nil {
+		t.Error("expected nil doc on error")
 	}
 }
 
@@ -1004,9 +1019,12 @@ func TestEnsureRootFolder_FindOrCreateError(t *testing.T) {
 	c := testGdriveClient(t, mux)
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureRootFolder(context.Background())
+	folder, err := fs.EnsureRootFolder(context.Background())
 	if err == nil {
 		t.Fatal("expected error from FindOrCreateFolder, got nil")
+	}
+	if folder != nil {
+		t.Error("expected nil folder on error")
 	}
 }
 
@@ -1022,9 +1040,12 @@ func TestEnsureConversationFolder_FindOrCreateError(t *testing.T) {
 	c := testGdriveClient(t, mux)
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureConversationFolder(context.Background(), "C001", "channel", "general")
+	result, err := fs.EnsureConversationFolder(context.Background(), "C001", "channel", "general")
 	if err == nil {
 		t.Fatal("expected error from FindOrCreateFolder, got nil")
+	}
+	if result != nil {
+		t.Error("expected nil result on error")
 	}
 }
 
@@ -1041,9 +1062,12 @@ func TestEnsureDailyDoc_FindOrCreateError(t *testing.T) {
 	c := testGdriveClient(t, mux)
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureDailyDoc(context.Background(), "C001", "2026-03-14")
+	doc, err := fs.EnsureDailyDoc(context.Background(), "C001", "2026-03-14")
 	if err == nil {
 		t.Fatal("expected error from FindOrCreateDocument, got nil")
+	}
+	if doc != nil {
+		t.Error("expected nil doc on error")
 	}
 }
 
@@ -1065,9 +1089,12 @@ func TestEnsureThreadDailyDoc_FindOrCreateError(t *testing.T) {
 	c := testGdriveClient(t, mux)
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureThreadDailyDoc(context.Background(), "C001", "1700000000.000100", "2023-11-14")
+	doc, err := fs.EnsureThreadDailyDoc(context.Background(), "C001", "1700000000.000100", "2023-11-14")
 	if err == nil {
 		t.Fatal("expected error from FindOrCreateDocument, got nil")
+	}
+	if doc != nil {
+		t.Error("expected nil doc on error")
 	}
 }
 
@@ -1084,8 +1111,11 @@ func TestEnsureThreadsFolder_FindOrCreateError(t *testing.T) {
 	c := testGdriveClient(t, mux)
 	fs := NewFolderStructure(c, idx, nil)
 
-	_, err := fs.EnsureThreadsFolder(context.Background(), "C001")
+	id, err := fs.EnsureThreadsFolder(context.Background(), "C001")
 	if err == nil {
 		t.Fatal("expected error from FindOrCreateFolder, got nil")
+	}
+	if id != "" {
+		t.Error("expected empty id on error")
 	}
 }

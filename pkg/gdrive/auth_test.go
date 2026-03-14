@@ -76,9 +76,12 @@ func TestLoadTokenFromStore_MissingToken(t *testing.T) {
 	t.Parallel()
 	store := testFileStore(t) // empty store — no token
 
-	_, err := LoadTokenFromStore(store)
+	token, err := LoadTokenFromStore(store)
 	if err == nil {
 		t.Fatal("LoadTokenFromStore with empty store: expected error, got nil")
+	}
+	if token != nil {
+		t.Error("expected nil token on error")
 	}
 }
 
@@ -91,9 +94,12 @@ func TestLoadTokenFromStore_CorruptJSON(t *testing.T) {
 	}
 	store := &secrets.FileStore{ConfigDir: dir}
 
-	_, err := LoadTokenFromStore(store)
+	token, err := LoadTokenFromStore(store)
 	if err == nil {
 		t.Fatal("LoadTokenFromStore with corrupt JSON: expected error, got nil")
+	}
+	if token != nil {
+		t.Error("expected nil token on error")
 	}
 }
 
@@ -157,9 +163,12 @@ func TestAuthenticateWithStore_MissingCredentials(t *testing.T) {
 	cfg := &Config{}
 	ctx := context.Background()
 
-	_, err := AuthenticateWithStore(ctx, cfg, store)
+	client, err := AuthenticateWithStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("AuthenticateWithStore with no credentials: expected error, got nil")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
 	}
 }
 
@@ -220,9 +229,12 @@ func TestClientFromStore_MissingCredentials(t *testing.T) {
 	cfg := &Config{}
 	ctx := context.Background()
 
-	_, err := ClientFromStore(ctx, cfg, store)
+	client, err := ClientFromStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("ClientFromStore with no credentials: expected error, got nil")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
 	}
 }
 
@@ -234,9 +246,12 @@ func TestClientFromStore_MissingToken(t *testing.T) {
 	cfg := &Config{}
 	ctx := context.Background()
 
-	_, err := ClientFromStore(ctx, cfg, store)
+	client, err := ClientFromStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("ClientFromStore with no token: expected error, got nil")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
 	}
 }
 
@@ -251,9 +266,12 @@ func TestClientFromStore_ExpiredNoRefresh(t *testing.T) {
 	cfg := &Config{}
 	ctx := context.Background()
 
-	_, err := ClientFromStore(ctx, cfg, store)
+	client, err := ClientFromStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("ClientFromStore with expired token and no refresh: expected error, got nil")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
 	}
 }
 
@@ -374,9 +392,12 @@ func TestAuthenticateWithStore_BadCredentialsJSON(t *testing.T) {
 	cfg := &Config{}
 	ctx := context.Background()
 
-	_, err := AuthenticateWithStore(ctx, cfg, store)
+	client, err := AuthenticateWithStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("AuthenticateWithStore with bad credentials JSON: expected error, got nil")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
 	}
 	if !strings.Contains(err.Error(), "parse credentials") {
 		t.Errorf("error %q should mention 'parse credentials'", err.Error())
@@ -556,9 +577,12 @@ func TestClientFromStore_ExpiredNoRefresh_ErrorMessage(t *testing.T) {
 	cfg := &Config{}
 	ctx := context.Background()
 
-	_, err := ClientFromStore(ctx, cfg, store)
+	client, err := ClientFromStore(ctx, cfg, store)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
 	}
 	if !strings.Contains(err.Error(), "auth login") {
 		t.Errorf("error %q should contain 'auth login' hint", err.Error())
