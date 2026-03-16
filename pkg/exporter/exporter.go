@@ -137,6 +137,7 @@ func (e *Exporter) InitializeWithStore(ctx context.Context, chromePort int, stor
 	e.Progress("Found Slack team: %s", creds.TeamDomain)
 
 	e.slackClient = slackapi.NewBrowserClient(creds.Token, creds.Cookie)
+	e.slackClient.SetDebug(e.debug)
 
 	e.folderStructure = NewFolderStructure(e.gdriveClient, e.index, &FolderStructureConfig{
 		RootFolderName: e.rootFolderName,

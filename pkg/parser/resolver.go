@@ -4,7 +4,6 @@ package parser
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/jflowers/get-out/pkg/slackapi"
 )
@@ -63,11 +62,9 @@ func (r *UserResolver) LoadUsers(ctx context.Context, client SlackAPI, onProgres
 		}
 		cursor = resp.ResponseMetadata.NextCursor
 
-		// Throttle to stay under Slack's Tier 2 rate limits
-		select {
-		case <-ctx.Done():
+		// Check for cancellation between pages
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case <-time.After(1200 * time.Millisecond):
 		}
 	}
 
@@ -98,11 +95,9 @@ func fetchConversationMembers(ctx context.Context, client SlackAPI, channelID st
 		}
 		cursor = resp.ResponseMetadata.NextCursor
 
-		// Throttle between pages
-		select {
-		case <-ctx.Done():
+		// Check for cancellation between pages
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
 		}
 	}
 	return nil
@@ -131,11 +126,9 @@ func (r *UserResolver) LoadUsersForConversations(ctx context.Context, client Sla
 			progressFn(channelID, len(memberSet))
 		}
 
-		// Throttle between conversations
-		select {
-		case <-ctx.Done():
+		// Check for cancellation between conversations
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
 		}
 	}
 
@@ -157,11 +150,9 @@ func (r *UserResolver) LoadUsersForConversations(ctx context.Context, client Sla
 			progressFn("users", fetched)
 		}
 
-		// Throttle user info fetches
-		select {
-		case <-ctx.Done():
+		// Check for cancellation between user fetches
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
 		}
 	}
 

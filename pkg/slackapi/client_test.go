@@ -24,10 +24,12 @@ func newTestServer(t *testing.T, handlers map[string]http.HandlerFunc) *httptest
 }
 
 // newBrowserTestClient creates a browser-mode client wired to the test server.
+// Uses a no-op rate limiter to avoid real pacing delays in tests.
 func newBrowserTestClient(server *httptest.Server) *Client {
 	return NewBrowserClient("test-token", "test-cookie",
 		WithBaseURL(server.URL),
 		WithHTTPClient(server.Client()),
+		WithRateLimiter(NoOpRateLimiter()),
 	)
 }
 
@@ -36,6 +38,7 @@ func newAPITestClient(server *httptest.Server) *Client {
 	return NewAPIClient("test-token",
 		WithBaseURL(server.URL),
 		WithHTTPClient(server.Client()),
+		WithRateLimiter(NoOpRateLimiter()),
 	)
 }
 

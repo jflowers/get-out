@@ -25,6 +25,7 @@ type Client struct {
 	token      string // xoxc- or xoxb- token
 	cookie     string // xoxd- cookie (only for browser mode)
 	mode       AuthMode
+	limiter    *RateLimiter
 }
 
 // AuthMode represents the authentication mode.
@@ -54,6 +55,13 @@ func WithBaseURL(u string) ClientOption {
 	}
 }
 
+// WithRateLimiter sets a custom rate limiter (useful for testing).
+func WithRateLimiter(rl *RateLimiter) ClientOption {
+	return func(client *Client) {
+		client.limiter = rl
+	}
+}
+
 // NewBrowserClient creates a client using browser-extracted credentials.
 // This mode can access DMs and group messages.
 func NewBrowserClient(token, cookie string, opts ...ClientOption) *Client {
@@ -63,6 +71,7 @@ func NewBrowserClient(token, cookie string, opts ...ClientOption) *Client {
 		token:      token,
 		cookie:     cookie,
 		mode:       AuthModeBrowser,
+		limiter:    NewRateLimiter(DefaultTierIntervals()),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -78,6 +87,7 @@ func NewAPIClient(token string, opts ...ClientOption) *Client {
 		baseURL:    defaultBaseURL,
 		token:      token,
 		mode:       AuthModeAPI,
+		limiter:    NewRateLimiter(DefaultTierIntervals()),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -90,28 +100,36 @@ func (c *Client) Mode() AuthMode {
 	return c.mode
 }
 
+// SetDebug enables or disables debug logging for the rate limiter.
+func (c *Client) SetDebug(debug bool) {
+	c.limiter.SetDebug(debug)
+}
+
 // request makes an API request to Slack with automatic rate-limit retry.
+// The rate limiter paces requests per endpoint to avoid 429 responses.
 func (c *Client) request(ctx context.Context, method, endpoint string, params url.Values, result interface{}) error {
 	const maxRetries = 3
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Wait for rate limit clearance
+		if err := c.limiter.Wait(ctx, endpoint); err != nil {
+			return err
+		}
+
 		err := c.doRequest(ctx, method, endpoint, params, result)
 		if err == nil {
+			c.limiter.RecordSuccess(endpoint)
 			return nil
 		}
 
-		// If rate-limited, wait and retry
+		// If rate-limited, record the backoff and let the next Wait() handle the delay
 		rle, ok := err.(*RateLimitError)
 		if !ok || attempt == maxRetries {
 			return err
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(rle.RetryAfter):
-			fmt.Fprintf(os.Stderr, "  Rate limited on %s, waited %v (attempt %d/%d)\n", endpoint, rle.RetryAfter, attempt+1, maxRetries)
-		}
+		c.limiter.RecordRateLimit(endpoint, rle.RetryAfter)
+		fmt.Fprintf(os.Stderr, "  Rate limited on %s, backing off (attempt %d/%d)\n", endpoint, attempt+1, maxRetries)
 	}
 
 	return fmt.Errorf("exhausted retries for %s", endpoint)
@@ -405,6 +423,7 @@ type ListConversationsOptions struct {
 // GetAllMessages retrieves all messages from a conversation, handling pagination.
 // It calls the callback for each batch of messages.
 // oldest and latest are Slack timestamps that bound the query window.
+// Rate limiting and retries are handled centrally by the client's rate limiter.
 func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, latest string, callback func([]Message) error) error {
 	opts := &HistoryOptions{
 		Limit:  200,
@@ -415,15 +434,6 @@ func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, l
 	for {
 		resp, err := c.GetConversationHistory(ctx, channelID, opts)
 		if err != nil {
-			// Handle rate limiting
-			if rle, ok := err.(*RateLimitError); ok {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(rle.RetryAfter):
-					continue
-				}
-			}
 			return err
 		}
 
@@ -444,6 +454,7 @@ func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, l
 }
 
 // GetAllReplies retrieves all replies in a thread, handling pagination.
+// Rate limiting and retries are handled centrally by the client's rate limiter.
 func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, callback func([]Message) error) error {
 	opts := &RepliesOptions{
 		Limit: 200,
@@ -452,14 +463,6 @@ func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, 
 	for {
 		resp, err := c.GetConversationReplies(ctx, channelID, threadTS, opts)
 		if err != nil {
-			if rle, ok := err.(*RateLimitError); ok {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(rle.RetryAfter):
-					continue
-				}
-			}
 			return err
 		}
 
