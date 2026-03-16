@@ -261,14 +261,7 @@ func validateDriveID(id string) error {
 	return nil
 }
 
-// isTerminal returns true when stdin is a real TTY.
-func isTerminal() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
+// isTerminal is defined in helpers.go
 
 // promptFolderID shows an interactive huh prompt for the Google Drive folder ID.
 func promptFolderID() (string, error) {
@@ -346,7 +339,16 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Check 5: Drive API
 	if gdriveAPIOK {
+		var driveSpinner *StatusSpinner
+		if isTerminal() {
+			driveSpinner = NewStatusSpinner()
+			driveSpinner.Update("Checking Drive API access...")
+			driveSpinner.Start()
+		}
 		checkDriveAPI(configDir, secretStore, &passCount, &warnCount, &failCount)
+		if driveSpinner != nil {
+			driveSpinner.Stop()
+		}
 	} else {
 		fmt.Println(dimStyle.Render("  — Drive API check skipped"))
 	}
@@ -362,7 +364,16 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	// Check 9: Slack tab
 	if chromeOK {
+		var slackSpinner *StatusSpinner
+		if isTerminal() {
+			slackSpinner = NewStatusSpinner()
+			slackSpinner.Update("Checking Slack tab...")
+			slackSpinner.Start()
+		}
 		checkSlackTab(chromePort, &passCount, &warnCount, &failCount)
+		if slackSpinner != nil {
+			slackSpinner.Stop()
+		}
 	} else {
 		warn("Slack tab check skipped (Chrome not reachable)")
 		warnCount++

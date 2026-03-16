@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/jflowers/get-out/pkg/chrome"
 	"github.com/jflowers/get-out/pkg/config"
@@ -112,11 +111,22 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		client = slackapi.NewBrowserClient(creds.Token, creds.Cookie)
 	}
 
+	// Create spinner for non-verbose interactive mode
+	var spin *StatusSpinner
+	if isTerminal() {
+		spin = NewStatusSpinner()
+	}
+
 	// Collect unique member IDs across channel conversations only.
 	// DMs and MPDMs are not accessible via bot token for member listing.
 	fmt.Println()
 	memberSet := make(map[string]bool)
 	skippedConvs := 0
+
+	if spin != nil {
+		spin.Start()
+	}
+
 	for _, conv := range cfg.Conversations {
 		// Only fetch members from channels — bot tokens can't list DM/MPIM members
 		if conv.Type != models.ConversationTypeChannel && conv.Type != models.ConversationTypePrivateChannel {
@@ -124,14 +134,20 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fmt.Printf("  Fetching members for %s (%s)...", conv.Name, conv.ID)
+		if spin != nil {
+			spin.Update(fmt.Sprintf("Fetching members for %s (%s)...", conv.Name, conv.ID))
+		} else {
+			fmt.Printf("  Fetching members for %s (%s)...", conv.Name, conv.ID)
+		}
 
 		count := 0
 		cursor := ""
 		for {
 			resp, err := client.GetConversationMembers(ctx, conv.ID, cursor)
 			if err != nil {
-				fmt.Printf(" error: %v\n", err)
+				if spin == nil {
+					fmt.Printf(" error: %v\n", err)
+				}
 				break
 			}
 
@@ -147,24 +163,30 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 			}
 			cursor = resp.ResponseMetadata.NextCursor
 
-			// Throttle
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
+				if spin != nil {
+					spin.Stop()
+				}
 				return ctx.Err()
-			case <-time.After(500 * time.Millisecond):
 			}
 		}
-		fmt.Printf(" %d members\n", count)
+		if spin == nil {
+			fmt.Printf(" %d members\n", count)
+		}
 
-		// Throttle between conversations
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
+			if spin != nil {
+				spin.Stop()
+			}
 			return ctx.Err()
-		case <-time.After(500 * time.Millisecond):
 		}
 	}
 
-	fmt.Printf("\nFound %d unique members across all channels", len(memberSet))
+	if spin != nil {
+		spin.Stop()
+	}
+
+	fmt.Printf("Found %d unique members across all channels", len(memberSet))
 	if skippedConvs > 0 {
 		fmt.Printf(" (skipped %d DMs/MPDMs)", skippedConvs)
 	}
@@ -192,6 +214,10 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	fetched := 0
 	skipped := 0
 
+	if spin != nil {
+		spin.Start()
+	}
+
 	for memberID := range memberSet {
 		// Skip if already in existing people.json
 		if merge {
@@ -212,16 +238,22 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 		fetchedUsers = append(fetchedUsers, user)
 		fetched++
 
-		if fetched%25 == 0 {
+		if spin != nil {
+			spin.Update(fmt.Sprintf("Fetching user profiles... %d/%d", fetched, len(memberSet)))
+		} else if fetched%25 == 0 {
 			fmt.Printf("  Fetched %d user profiles...\n", fetched)
 		}
 
-		// Throttle
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
+			if spin != nil {
+				spin.Stop()
+			}
 			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
 		}
+	}
+
+	if spin != nil {
+		spin.Stop()
 	}
 
 	fmt.Printf("  Fetched %d new user profiles", fetched)

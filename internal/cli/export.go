@@ -190,11 +190,20 @@ func runExport(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Create spinner for non-verbose interactive mode
+	var spin *StatusSpinner
+	if !verbose && !debugMode && isTerminal() {
+		spin = NewStatusSpinner()
+	}
+
 	// Handle interrupt gracefully
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
+		if spin != nil {
+			spin.Stop()
+		}
 		fmt.Println("\nInterrupt received, saving progress...")
 		cancel()
 	}()
@@ -241,6 +250,8 @@ func runExport(cmd *cobra.Command, args []string) error {
 		OnProgress: func(msg string) {
 			if verbose || debugMode {
 				fmt.Printf("  %s\n", msg)
+			} else if spin != nil {
+				spin.Update(msg)
 			}
 		},
 	})
@@ -256,7 +267,16 @@ func runExport(cmd *cobra.Command, args []string) error {
 	fmt.Println("Starting export...")
 	fmt.Println()
 
+	if spin != nil {
+		spin.Start()
+	}
+
 	results, err := exp.ExportAllParallel(ctx, toExport, exportParallel)
+
+	if spin != nil {
+		spin.Stop()
+	}
+
 	if err != nil {
 		return fmt.Errorf("export failed: %w", err)
 	}
