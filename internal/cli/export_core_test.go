@@ -15,11 +15,11 @@ import (
 func testConversationsConfig() *config.ConversationsConfig {
 	return &config.ConversationsConfig{
 		Conversations: []config.ConversationConfig{
-			{ID: "C001ABC", Name: "general", Type: models.ConversationTypeChannel, Mode: models.ExportModeBrowser, Export: true},
-			{ID: "C002DEF", Name: "random", Type: models.ConversationTypeChannel, Mode: models.ExportModeBrowser, Export: false},
-			{ID: "D003GHI", Name: "dm-alice", Type: models.ConversationTypeDM, Mode: models.ExportModeBrowser, Export: true},
-			{ID: "D004JKL", Name: "dm-bob", Type: models.ConversationTypeDM, Mode: models.ExportModeBrowser, Export: false},
-			{ID: "G005MNO", Name: "group-chat", Type: models.ConversationTypeMPIM, Mode: models.ExportModeAPI, Export: true},
+			{ID: "C001ABC", Name: "general", Type: models.ConversationTypeChannel, Export: true},
+			{ID: "C002DEF", Name: "random", Type: models.ConversationTypeChannel, Export: false},
+			{ID: "D003GHI", Name: "dm-alice", Type: models.ConversationTypeDM, Export: true},
+			{ID: "D004JKL", Name: "dm-bob", Type: models.ConversationTypeDM, Export: false},
+			{ID: "G005MNO", Name: "group-chat", Type: models.ConversationTypeMPIM, Export: true},
 		},
 	}
 }
@@ -186,13 +186,11 @@ func TestFormatExportDryRun(t *testing.T) {
 			ID:   "C001ABC",
 			Name: "general",
 			Type: models.ConversationTypeChannel,
-			Mode: models.ExportModeBrowser,
 		},
 		{
 			ID:           "D002DEF",
 			Name:         "dm-alice",
 			Type:         models.ConversationTypeDM,
-			Mode:         models.ExportModeBrowser,
 			Share:        true,
 			ShareMembers: []string{"alice@example.com", "bob@example.com"},
 		},
@@ -200,7 +198,6 @@ func TestFormatExportDryRun(t *testing.T) {
 			ID:    "G003GHI",
 			Name:  "group-chat",
 			Type:  models.ConversationTypeMPIM,
-			Mode:  models.ExportModeAPI,
 			Share: true,
 		},
 	}
@@ -225,9 +222,9 @@ func TestFormatExportDryRun(t *testing.T) {
 		t.Error("missing group-chat conversation")
 	}
 
-	// Verify type/mode lines
-	if !strings.Contains(output, "Type: channel, Mode: browser") {
-		t.Error("missing type/mode for general")
+	// Verify type line
+	if !strings.Contains(output, "Type: channel") {
+		t.Error("missing type for general")
 	}
 
 	// Verify sharing info with members

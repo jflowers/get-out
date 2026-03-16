@@ -343,7 +343,7 @@ func formatExportDryRun(w io.Writer, conversations []config.ConversationConfig) 
 	fmt.Fprintln(w)
 	for _, c := range conversations {
 		fmt.Fprintf(w, "  - %s (%s)\n", c.Name, c.ID)
-		fmt.Fprintf(w, "    Type: %s, Mode: %s\n", c.Type, c.Mode)
+		fmt.Fprintf(w, "    Type: %s\n", c.Type)
 		if c.Share {
 			fmt.Fprintf(w, "    Sharing: enabled")
 			if len(c.ShareMembers) > 0 {

@@ -16,7 +16,6 @@ func TestLoadConversations(t *testing.T) {
 				"id": "C04KFBJTDJR",
 				"name": "team-engineering",
 				"type": "channel",
-				"mode": "api",
 				"export": true,
 				"share": false
 			},
@@ -24,7 +23,6 @@ func TestLoadConversations(t *testing.T) {
 				"id": "D06DDJ2UH2M",
 				"name": "John Smith",
 				"type": "dm",
-				"mode": "browser",
 				"export": true,
 				"share": true
 			}
@@ -61,23 +59,19 @@ func TestLoadConversations_Invalid(t *testing.T) {
 	}{
 		{
 			name: "missing id",
-			data: `{"conversations": [{"name": "test", "type": "channel", "mode": "api"}]}`,
+			data: `{"conversations": [{"name": "test", "type": "channel"}]}`,
 		},
 		{
 			name: "invalid id format",
-			data: `{"conversations": [{"id": "invalid", "name": "test", "type": "channel", "mode": "api"}]}`,
+			data: `{"conversations": [{"id": "invalid", "name": "test", "type": "channel"}]}`,
 		},
 		{
 			name: "missing name",
-			data: `{"conversations": [{"id": "C123ABC", "type": "channel", "mode": "api"}]}`,
+			data: `{"conversations": [{"id": "C123ABC", "type": "channel"}]}`,
 		},
 		{
 			name: "invalid type",
-			data: `{"conversations": [{"id": "C123ABC", "name": "test", "type": "invalid", "mode": "api"}]}`,
-		},
-		{
-			name: "invalid mode",
-			data: `{"conversations": [{"id": "C123ABC", "name": "test", "type": "channel", "mode": "invalid"}]}`,
+			data: `{"conversations": [{"id": "C123ABC", "name": "test", "type": "invalid"}]}`,
 		},
 	}
 
@@ -102,9 +96,9 @@ func TestLoadConversations_Invalid(t *testing.T) {
 func TestFilterByExport(t *testing.T) {
 	cfg := &ConversationsConfig{
 		Conversations: []ConversationConfig{
-			{ID: "C1", Name: "a", Type: "channel", Mode: "api", Export: true},
-			{ID: "C2", Name: "b", Type: "channel", Mode: "api", Export: false},
-			{ID: "C3", Name: "c", Type: "channel", Mode: "api", Export: true},
+			{ID: "C1", Name: "a", Type: "channel", Export: true},
+			{ID: "C2", Name: "b", Type: "channel", Export: false},
+			{ID: "C3", Name: "c", Type: "channel", Export: true},
 		},
 	}
 
@@ -120,8 +114,8 @@ func TestFilterByExport(t *testing.T) {
 func TestGetByID(t *testing.T) {
 	cfg := &ConversationsConfig{
 		Conversations: []ConversationConfig{
-			{ID: "C1", Name: "one", Type: "channel", Mode: "api"},
-			{ID: "C2", Name: "two", Type: "channel", Mode: "api"},
+			{ID: "C1", Name: "one", Type: "channel"},
+			{ID: "C2", Name: "two", Type: "channel"},
 		},
 	}
 
@@ -273,10 +267,10 @@ func TestBuildEmailMap(t *testing.T) {
 func TestFilterByType(t *testing.T) {
 	cfg := &ConversationsConfig{
 		Conversations: []ConversationConfig{
-			{ID: "C1", Name: "ch1", Type: "channel", Mode: "api"},
-			{ID: "D1", Name: "dm1", Type: "dm", Mode: "browser"},
-			{ID: "C2", Name: "ch2", Type: "channel", Mode: "api"},
-			{ID: "G1", Name: "grp", Type: "mpim", Mode: "browser"},
+			{ID: "C1", Name: "ch1", Type: "channel"},
+			{ID: "D1", Name: "dm1", Type: "dm"},
+			{ID: "C2", Name: "ch2", Type: "channel"},
+			{ID: "G1", Name: "grp", Type: "mpim"},
 		},
 	}
 
@@ -303,33 +297,6 @@ func TestFilterByType(t *testing.T) {
 	}
 }
 
-func TestFilterByMode(t *testing.T) {
-	cfg := &ConversationsConfig{
-		Conversations: []ConversationConfig{
-			{ID: "C1", Name: "ch1", Type: "channel", Mode: "api"},
-			{ID: "D1", Name: "dm1", Type: "dm", Mode: "browser"},
-			{ID: "C2", Name: "ch2", Type: "channel", Mode: "api"},
-			{ID: "G1", Name: "grp", Type: "mpim", Mode: "browser"},
-		},
-	}
-
-	api := cfg.FilterByMode("api")
-	if len(api) != 2 {
-		t.Fatalf("FilterByMode(api) = %d, want 2", len(api))
-	}
-	if api[0].ID != "C1" || api[1].ID != "C2" {
-		t.Errorf("FilterByMode(api) IDs = {%s, %s}, want {C1, C2}", api[0].ID, api[1].ID)
-	}
-
-	browser := cfg.FilterByMode("browser")
-	if len(browser) != 2 {
-		t.Fatalf("FilterByMode(browser) = %d, want 2", len(browser))
-	}
-	if browser[0].ID != "D1" || browser[1].ID != "G1" {
-		t.Errorf("FilterByMode(browser) IDs = {%s, %s}, want {D1, G1}", browser[0].ID, browser[1].ID)
-	}
-}
-
 func TestLoadConversations_ContractAssertions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "conversations.json")
@@ -340,7 +307,6 @@ func TestLoadConversations_ContractAssertions(t *testing.T) {
 				"id": "C04KFBJTDJR",
 				"name": "team-engineering",
 				"type": "channel",
-				"mode": "api",
 				"export": true,
 				"share": false
 			},
@@ -348,7 +314,6 @@ func TestLoadConversations_ContractAssertions(t *testing.T) {
 				"id": "D06DDJ2UH2M",
 				"name": "John Smith",
 				"type": "dm",
-				"mode": "browser",
 				"export": true,
 				"share": true
 			}
@@ -382,9 +347,6 @@ func TestLoadConversations_ContractAssertions(t *testing.T) {
 	if c0.Type != "channel" {
 		t.Errorf("Conversations[0].Type = %q, want channel", c0.Type)
 	}
-	if c0.Mode != "api" {
-		t.Errorf("Conversations[0].Mode = %q, want api", c0.Mode)
-	}
 	if !c0.Export {
 		t.Error("Conversations[0].Export = false, want true")
 	}
@@ -402,9 +364,6 @@ func TestLoadConversations_ContractAssertions(t *testing.T) {
 	}
 	if c1.Type != "dm" {
 		t.Errorf("Conversations[1].Type = %q, want dm", c1.Type)
-	}
-	if c1.Mode != "browser" {
-		t.Errorf("Conversations[1].Mode = %q, want browser", c1.Mode)
 	}
 	if !c1.Export {
 		t.Error("Conversations[1].Export = false, want true")

@@ -38,7 +38,6 @@ type ConversationConfig struct {
 	ID           string                  `json:"id"`
 	Name         string                  `json:"name"`
 	Type         models.ConversationType `json:"type"`
-	Mode         models.ExportMode       `json:"mode"`
 	Export       bool                    `json:"export"`
 	Share        bool                    `json:"share"`
 	ShareMembers []string                `json:"shareMembers,omitempty"`

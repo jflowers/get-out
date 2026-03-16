@@ -13,10 +13,6 @@ const (
 	ConversationTypePrivateChannel ConversationType = "private_channel"
 )
 
-// ExportMode represents how to access a conversation's messages.
-type ExportMode string
-
-const (
-	ExportModeAPI     ExportMode = "api"     // Legacy: all exports now use browser mode
-	ExportModeBrowser ExportMode = "browser" // Use browser session token (xoxc-)
-)
+// All conversations are exported using browser session tokens (xoxc-) via Chrome CDP.
+// The ExportMode type was removed — there is no longer a distinction between
+// API and browser export modes.

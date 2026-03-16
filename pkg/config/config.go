@@ -113,9 +113,6 @@ func validateConversationConfig(c *ConversationConfig) error {
 	if !isValidConversationType(c.Type) {
 		return fmt.Errorf("invalid type: %s", c.Type)
 	}
-	if !isValidExportMode(c.Mode) {
-		return fmt.Errorf("invalid mode: %s", c.Mode)
-	}
 	return nil
 }
 
@@ -147,14 +144,6 @@ func isValidConversationType(t models.ConversationType) bool {
 	return false
 }
 
-func isValidExportMode(m models.ExportMode) bool {
-	switch m {
-	case models.ExportModeAPI, models.ExportModeBrowser:
-		return true
-	}
-	return false
-}
-
 // FilterByExport returns only conversations where export=true.
 func (c *ConversationsConfig) FilterByExport() []ConversationConfig {
 	var result []ConversationConfig
@@ -171,17 +160,6 @@ func (c *ConversationsConfig) FilterByType(convType models.ConversationType) []C
 	var result []ConversationConfig
 	for _, conv := range c.Conversations {
 		if conv.Type == convType {
-			result = append(result, conv)
-		}
-	}
-	return result
-}
-
-// FilterByMode returns conversations matching the given export mode.
-func (c *ConversationsConfig) FilterByMode(mode models.ExportMode) []ConversationConfig {
-	var result []ConversationConfig
-	for _, conv := range c.Conversations {
-		if conv.Mode == mode {
 			result = append(result, conv)
 		}
 	}
