@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,8 +11,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// ANSI escape sequences for cursor and line control.
+const (
+	hideCursor = "\033[?25l"
+	showCursor = "\033[?25h"
+	clearLine  = "\033[2K\r" // erase entire line + carriage return
+)
+
 // StatusSpinner displays an animated spinner with a status message on a single
-// terminal line. It writes to stderr via carriage return to overwrite in place,
+// terminal line. It writes to stderr via ANSI escapes to overwrite in place,
 // avoiding interference with stdout content.
 //
 // The spinner is designed for CLI commands that run long operations (export,
@@ -54,6 +60,9 @@ func (s *StatusSpinner) Start() {
 	s.wg.Add(1)
 	s.mu.Unlock()
 
+	// Hide cursor while spinner is active
+	fmt.Fprint(s.writer, hideCursor)
+
 	go s.run()
 }
 
@@ -78,8 +87,8 @@ func (s *StatusSpinner) Stop() {
 	close(s.done)
 	s.wg.Wait() // wait for goroutine to exit before writing
 
-	// Clear the spinner line — safe because goroutine has exited
-	fmt.Fprintf(s.writer, "\r%s\r", strings.Repeat(" ", 80))
+	// Clear the spinner line and restore cursor — safe because goroutine has exited
+	fmt.Fprint(s.writer, clearLine+showCursor)
 }
 
 func (s *StatusSpinner) run() {
@@ -100,9 +109,10 @@ func (s *StatusSpinner) run() {
 			style := s.style
 			s.mu.Unlock()
 
-			// Write under mutex to prevent race with Stop's clear line.
-			// This is safe because Stop waits for this goroutine to exit.
-			fmt.Fprintf(s.writer, "\r%s %s", style.Render(frame), msg)
+			// Erase the full line then write the new content.
+			// This prevents old text from bleeding through when a shorter
+			// message replaces a longer one.
+			fmt.Fprintf(s.writer, "%s%s %s", clearLine, style.Render(frame), msg)
 
 			frameIdx++
 		}

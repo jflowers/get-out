@@ -54,9 +54,9 @@ func TestStatusSpinner_StartStop(t *testing.T) {
 		t.Error("spinner wrote nothing to buffer")
 	}
 
-	// Verify the line was cleared (ends with spaces + \r)
-	if !strings.HasSuffix(output, "\r") {
-		t.Error("spinner did not clear the line on Stop()")
+	// Verify the line was cleared (ends with clear-line escape + show-cursor escape)
+	if !strings.Contains(output, showCursor) {
+		t.Error("spinner did not restore cursor on Stop()")
 	}
 }
 
