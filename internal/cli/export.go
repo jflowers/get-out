@@ -242,7 +242,6 @@ func runExport(cmd *cobra.Command, args []string) error {
 		ChromePort:            chromePort,
 		Debug:                 debugMode,
 		GoogleCredentialsFile: settings.GoogleCredentialsFile,
-		SlackBotToken:         settings.SlackBotToken,
 		DateFrom:              dateFrom,
 		DateTo:                dateTo,
 		SyncMode:              exportSync,

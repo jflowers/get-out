@@ -6,9 +6,6 @@ import "github.com/jflowers/get-out/pkg/models"
 // Settings is the root structure for settings.json.
 // It contains application-wide configuration options.
 type Settings struct {
-	// Slack configuration
-	SlackBotToken string `json:"slackBotToken,omitempty"`
-
 	// Google Drive configuration
 	GoogleCredentialsFile string `json:"googleCredentialsFile,omitempty"`
 	GoogleDriveFolderID   string `json:"googleDriveFolderId,omitempty"`

@@ -80,10 +80,6 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Found %d conversations in config\n", len(cfg.Conversations))
 
-	// Load settings for optional bot token
-	settingsPath := filepath.Join(configDir, "settings.json")
-	settings, _ := config.LoadSettings(settingsPath) // Ignore error - settings are optional
-
 	// Connect to Chrome and extract Slack credentials
 	fmt.Println("Connecting to Chrome...")
 	chromeCfg := chrome.DefaultConfig()
@@ -101,15 +97,8 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Found Slack team: %s\n\n", creds.TeamDomain)
 
-	// Create Slack client
-	var client *slackapi.Client
-	if settings != nil && settings.SlackBotToken != "" {
-		fmt.Println("Using API mode (bot token)")
-		client = slackapi.NewAPIClient(settings.SlackBotToken)
-	} else {
-		fmt.Println("Using browser mode (xoxc token)")
-		client = slackapi.NewBrowserClient(creds.Token, creds.Cookie)
-	}
+	// Create Slack client using browser credentials
+	client := slackapi.NewBrowserClient(creds.Token, creds.Cookie)
 
 	// Create spinner for non-verbose interactive mode
 	var spin *StatusSpinner
@@ -118,7 +107,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 
 	// Collect unique member IDs across channel conversations only.
-	// DMs and MPDMs are not accessible via bot token for member listing.
+	// DMs and MPIMs don't support member listing via the Slack API.
 	fmt.Println()
 	memberSet := make(map[string]bool)
 	skippedConvs := 0
@@ -128,7 +117,7 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, conv := range cfg.Conversations {
-		// Only fetch members from channels — bot tokens can't list DM/MPIM members
+		// Only fetch members from channels — DM/MPIM members aren't listed via API
 		if conv.Type != models.ConversationTypeChannel && conv.Type != models.ConversationTypePrivateChannel {
 			skippedConvs++
 			continue

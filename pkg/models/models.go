@@ -17,6 +17,6 @@ const (
 type ExportMode string
 
 const (
-	ExportModeAPI     ExportMode = "api"     // Use Slack bot token (xoxb-)
+	ExportModeAPI     ExportMode = "api"     // Legacy: all exports now use browser mode
 	ExportModeBrowser ExportMode = "browser" // Use browser session token (xoxc-)
 )

@@ -22,7 +22,6 @@ type Exporter struct {
 	rootFolderName        string
 	rootFolderID          string
 	googleCredentialsFile string
-	slackBotToken         string
 
 	// Clients
 	slackClient  *slackapi.Client
@@ -58,7 +57,6 @@ type ExporterConfig struct {
 
 	// Optional paths from settings.json
 	GoogleCredentialsFile string // Custom path to credentials.json
-	SlackBotToken         string // Bot token for API mode
 
 	// Date range, sync, and resume options
 	DateFrom   string // Slack timestamp: only export messages after this
@@ -82,7 +80,6 @@ func NewExporter(cfg *ExporterConfig) *Exporter {
 		rootFolderName:        cfg.RootFolderName,
 		rootFolderID:          cfg.RootFolderID,
 		googleCredentialsFile: cfg.GoogleCredentialsFile,
-		slackBotToken:         cfg.SlackBotToken,
 		debug:                 cfg.Debug,
 		onProgress:            cfg.OnProgress,
 		dateFrom:              cfg.DateFrom,

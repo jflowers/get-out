@@ -185,7 +185,6 @@ func TestLoadSettings(t *testing.T) {
 	// Valid file
 	path := filepath.Join(dir, "settings.json")
 	data := `{
-		"slackBotToken": "xoxb-test",
 		"googleDriveFolderId": "folder123",
 		"logLevel": "DEBUG"
 	}`
@@ -196,9 +195,6 @@ func TestLoadSettings(t *testing.T) {
 	s, err := LoadSettings(path)
 	if err != nil {
 		t.Fatalf("LoadSettings() error: %v", err)
-	}
-	if s.SlackBotToken != "xoxb-test" {
-		t.Errorf("SlackBotToken = %q, want xoxb-test", s.SlackBotToken)
 	}
 	if s.GoogleDriveFolderID != "folder123" {
 		t.Errorf("GoogleDriveFolderID = %q, want folder123", s.GoogleDriveFolderID)
@@ -445,9 +441,6 @@ func TestDefaultSettings_ContractAssertions(t *testing.T) {
 	}
 
 	// Assert every field has its expected default zero/non-zero value
-	if s.SlackBotToken != "" {
-		t.Errorf("SlackBotToken = %q, want empty", s.SlackBotToken)
-	}
 	if s.GoogleCredentialsFile != "" {
 		t.Errorf("GoogleCredentialsFile = %q, want empty", s.GoogleCredentialsFile)
 	}

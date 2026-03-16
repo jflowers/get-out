@@ -382,6 +382,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Check 10: export-index.json
 	checkExportIndex(configDir, &passCount, &warnCount, &failCount)
 
+	// Check 11: Background sync service
+	checkServiceInstalled(&passCount, &warnCount)
+
 	// T019: Old directory warning
 	home, _ := os.UserHomeDir()
 	oldDir := filepath.Join(home, ".config", "get-out")

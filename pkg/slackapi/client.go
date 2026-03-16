@@ -34,7 +34,7 @@ type AuthMode int
 const (
 	// AuthModeBrowser uses xoxc token + xoxd cookie (for DMs, groups)
 	AuthModeBrowser AuthMode = iota
-	// AuthModeAPI uses xoxb bot token (for channels)
+	// AuthModeAPI uses xoxb token (currently unused; retained for API compatibility)
 	AuthModeAPI
 )
 
@@ -79,8 +79,8 @@ func NewBrowserClient(token, cookie string, opts ...ClientOption) *Client {
 	return c
 }
 
-// NewAPIClient creates a client using a bot token (xoxb-).
-// This mode can access channels where the bot is installed.
+// NewAPIClient creates a client using an API token.
+// Currently unused by get-out (all exports use browser mode).
 func NewAPIClient(token string, opts ...ClientOption) *Client {
 	c := &Client{
 		httpClient: &http.Client{Timeout: defaultTimeout},
