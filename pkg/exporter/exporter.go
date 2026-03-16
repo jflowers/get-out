@@ -271,7 +271,7 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 	}
 
 	if len(allMessages) == 0 {
-		e.Progress("No new messages to export")
+		e.Progress("No new messages to export for %s", conv.Name)
 		result.Duration = time.Since(startTime)
 		return result, nil
 	}
@@ -452,11 +452,22 @@ func (e *Exporter) ExportAll(ctx context.Context, conversations []config.Convers
 		}
 	}
 
-	// Second pass: resolve cross-conversation Slack links now that all docs exist
-	if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
-		e.Progress("Warning: cross-link resolution had errors: %v", err)
-	} else if replaced > 0 {
-		e.Progress("Resolved %d cross-conversation links", replaced)
+	// Second pass: resolve cross-conversation Slack links — but only if any
+	// conversations actually exported new messages.
+	hasNewContent := false
+	for _, r := range results {
+		if r.MessageCount > 0 {
+			hasNewContent = true
+			break
+		}
+	}
+
+	if hasNewContent {
+		if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
+			e.Progress("Warning: cross-link resolution had errors: %v", err)
+		} else if replaced > 0 {
+			e.Progress("Resolved %d cross-conversation links", replaced)
+		}
 	}
 
 	return results, nil
@@ -565,14 +576,27 @@ outer:
 
 	wg.Wait()
 
-	// Second pass: resolve cross-conversation links
-	if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
-		e.Progress("Warning: cross-link resolution had errors: %v", err)
-	} else if replaced > 0 {
-		e.Progress("Resolved %d cross-conversation links", replaced)
+	// Second pass: resolve cross-conversation links — but only if any
+	// conversations actually exported new messages (skip when sync mode
+	// found nothing new, to avoid scanning hundreds of docs pointlessly).
+	collected := collectParallelResults(results)
+	hasNewContent := false
+	for _, r := range collected {
+		if r.MessageCount > 0 {
+			hasNewContent = true
+			break
+		}
 	}
 
-	return collectParallelResults(results), nil
+	if hasNewContent {
+		if replaced, err := e.ResolveCrossLinks(ctx); err != nil {
+			e.Progress("Warning: cross-link resolution had errors: %v", err)
+		} else if replaced > 0 {
+			e.Progress("Resolved %d cross-conversation links", replaced)
+		}
+	}
+
+	return collected, nil
 }
 
 // ResolveCrossLinks scans all exported docs for remaining Slack message links
@@ -584,12 +608,40 @@ func (e *Exporter) ResolveCrossLinks(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
+	// Count total docs to scan for progress reporting
+	totalDocs := 0
+	for _, conv := range e.index.Conversations {
+		for _, doc := range conv.DailyDocs {
+			if doc.DocID != "" {
+				totalDocs++
+			}
+		}
+		for _, thread := range conv.Threads {
+			for _, doc := range thread.DailyDocs {
+				if doc.DocID != "" {
+					totalDocs++
+				}
+			}
+		}
+	}
+
+	if totalDocs == 0 {
+		return 0, nil
+	}
+
+	e.Progress("Resolving cross-conversation links across %d docs...", totalDocs)
+
 	totalReplaced := 0
+	scanned := 0
 
 	for _, conv := range e.index.Conversations {
 		for _, doc := range conv.DailyDocs {
 			if doc.DocID == "" {
 				continue
+			}
+
+			if ctx.Err() != nil {
+				return totalReplaced, ctx.Err()
 			}
 
 			replaced, err := e.resolveLinksInDoc(ctx, doc.DocID)
@@ -600,6 +652,11 @@ func (e *Exporter) ResolveCrossLinks(ctx context.Context) (int, error) {
 				continue
 			}
 			totalReplaced += replaced
+			scanned++
+
+			if scanned%10 == 0 {
+				e.Progress("Scanning docs for cross-links... %d/%d", scanned, totalDocs)
+			}
 		}
 
 		// Also check thread docs
@@ -607,6 +664,10 @@ func (e *Exporter) ResolveCrossLinks(ctx context.Context) (int, error) {
 			for _, doc := range thread.DailyDocs {
 				if doc.DocID == "" {
 					continue
+				}
+
+				if ctx.Err() != nil {
+					return totalReplaced, ctx.Err()
 				}
 
 				replaced, err := e.resolveLinksInDoc(ctx, doc.DocID)
@@ -617,6 +678,11 @@ func (e *Exporter) ResolveCrossLinks(ctx context.Context) (int, error) {
 					continue
 				}
 				totalReplaced += replaced
+				scanned++
+
+				if scanned%10 == 0 {
+					e.Progress("Scanning docs for cross-links... %d/%d", scanned, totalDocs)
+				}
 			}
 		}
 	}
