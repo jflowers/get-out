@@ -97,82 +97,28 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Found Slack team: %s\n\n", creds.TeamDomain)
 
-	// Create Slack client using browser credentials
+	// Create Slack client
 	client := slackapi.NewBrowserClient(creds.Token, creds.Cookie)
 
-	// Create spinner for non-verbose interactive mode
+	// Create spinner for interactive mode
 	var spin *StatusSpinner
 	if isTerminal() {
 		spin = NewStatusSpinner()
 	}
 
-	// Collect unique member IDs across channel conversations only.
-	// DMs and MPIMs don't support member listing via the Slack API.
+	// Phase 1: Collect channel members
+	progress := makeSpinnerProgress(spin)
 	fmt.Println()
-	memberSet := make(map[string]bool)
-	skippedConvs := 0
-
 	if spin != nil {
 		spin.Start()
 	}
 
-	for _, conv := range cfg.Conversations {
-		// Only fetch members from channels — DM/MPIM members aren't listed via API
-		if conv.Type != models.ConversationTypeChannel && conv.Type != models.ConversationTypePrivateChannel {
-			skippedConvs++
-			continue
-		}
-
-		if spin != nil {
-			spin.Update(fmt.Sprintf("Fetching members for %s (%s)...", conv.Name, conv.ID))
-		} else {
-			fmt.Printf("  Fetching members for %s (%s)...", conv.Name, conv.ID)
-		}
-
-		count := 0
-		cursor := ""
-		for {
-			resp, err := client.GetConversationMembers(ctx, conv.ID, cursor)
-			if err != nil {
-				if spin == nil {
-					fmt.Printf(" error: %v\n", err)
-				}
-				break
-			}
-
-			for _, memberID := range resp.Members {
-				if !memberSet[memberID] {
-					memberSet[memberID] = true
-					count++
-				}
-			}
-
-			if resp.ResponseMetadata.NextCursor == "" {
-				break
-			}
-			cursor = resp.ResponseMetadata.NextCursor
-
-			if ctx.Err() != nil {
-				if spin != nil {
-					spin.Stop()
-				}
-				return ctx.Err()
-			}
-		}
-		if spin == nil {
-			fmt.Printf(" %d members\n", count)
-		}
-
-		if ctx.Err() != nil {
-			if spin != nil {
-				spin.Stop()
-			}
-			return ctx.Err()
-		}
-	}
-
+	memberSet, skippedConvs, err := collectChannelMembers(ctx, client, cfg.Conversations, progress)
 	if spin != nil {
 		spin.Stop()
+	}
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("Found %d unique members across all channels", len(memberSet))
@@ -183,78 +129,161 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 	// Load existing people.json if merging
 	peoplePath := filepath.Join(configDir, "people.json")
-	var existingPeople map[string]config.PersonConfig
-	if merge {
-		existingPeople = make(map[string]config.PersonConfig)
-		existing, err := config.LoadPeople(peoplePath)
-		if err == nil {
-			for _, p := range existing.People {
-				existingPeople[p.SlackID] = p
-			}
-			if len(existingPeople) > 0 {
-				fmt.Printf("Loaded %d existing people (will merge)\n", len(existingPeople))
-			}
-		}
-	}
+	existingPeople := loadExistingPeople(peoplePath, merge)
 
-	// Fetch user info for each member
+	// Phase 2: Fetch user profiles
 	fmt.Println("\nFetching user profiles...")
-	var fetchedUsers []*slackapi.User
-	fetched := 0
-	skipped := 0
-
 	if spin != nil {
 		spin.Start()
 	}
 
-	for memberID := range memberSet {
-		// Skip if already in existing people.json
-		if merge {
-			if _, exists := existingPeople[memberID]; exists {
-				skipped++
-				continue
-			}
-		}
-
-		user, err := client.GetUserInfo(ctx, memberID)
-		if err != nil {
-			if verbose {
-				fmt.Printf("  Warning: could not fetch user %s: %v\n", memberID, err)
-			}
-			continue
-		}
-
-		fetchedUsers = append(fetchedUsers, user)
-		fetched++
-
-		if spin != nil {
-			spin.Update(fmt.Sprintf("Fetching user profiles... %d/%d", fetched, len(memberSet)))
-		} else if fetched%25 == 0 {
-			fmt.Printf("  Fetched %d user profiles...\n", fetched)
-		}
-
-		if ctx.Err() != nil {
-			if spin != nil {
-				spin.Stop()
-			}
-			return ctx.Err()
-		}
-	}
-
+	fetchedUsers, skipped, err := fetchUserProfiles(ctx, client, memberSet, existingPeople, progress)
 	if spin != nil {
 		spin.Stop()
 	}
+	if err != nil {
+		return err
+	}
 
-	fmt.Printf("  Fetched %d new user profiles", fetched)
+	fmt.Printf("  Fetched %d new user profiles", len(fetchedUsers))
 	if skipped > 0 {
 		fmt.Printf(" (skipped %d already in people.json)", skipped)
 	}
 	fmt.Println()
 
-	// Convert fetched users to PersonConfig entries, filtering bots/deleted
+	// Phase 3: Write people.json
+	count, err := writePeopleJSON(peoplePath, fetchedUsers, existingPeople, merge)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\nWrote %d people to %s\n", count, peoplePath)
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Extracted functions
+// ---------------------------------------------------------------------------
+
+// makeSpinnerProgress returns a progress callback that updates the spinner if
+// available, or is a no-op otherwise.
+func makeSpinnerProgress(spin *StatusSpinner) func(string) {
+	if spin != nil {
+		return func(msg string) { spin.Update(msg) }
+	}
+	return func(msg string) {}
+}
+
+// collectChannelMembers fetches unique member IDs from channel conversations.
+// It skips DM and MPIM conversations (which don't support member listing).
+func collectChannelMembers(
+	ctx context.Context,
+	client *slackapi.Client,
+	conversations []config.ConversationConfig,
+	progress func(string),
+) (memberSet map[string]bool, skippedConvs int, err error) {
+	memberSet = make(map[string]bool)
+
+	for _, conv := range conversations {
+		if conv.Type != models.ConversationTypeChannel && conv.Type != models.ConversationTypePrivateChannel {
+			skippedConvs++
+			continue
+		}
+
+		progress(fmt.Sprintf("Fetching members for %s (%s)...", conv.Name, conv.ID))
+
+		cursor := ""
+		for {
+			resp, err := client.GetConversationMembers(ctx, conv.ID, cursor)
+			if err != nil {
+				break // skip this conversation on error
+			}
+
+			for _, memberID := range resp.Members {
+				memberSet[memberID] = true
+			}
+
+			if resp.ResponseMetadata.NextCursor == "" {
+				break
+			}
+			cursor = resp.ResponseMetadata.NextCursor
+
+			if ctx.Err() != nil {
+				return memberSet, skippedConvs, ctx.Err()
+			}
+		}
+
+		if ctx.Err() != nil {
+			return memberSet, skippedConvs, ctx.Err()
+		}
+	}
+
+	return memberSet, skippedConvs, nil
+}
+
+// fetchUserProfiles fetches user profiles for the given member IDs, skipping
+// any IDs present in the skip map. Returns fetched users and skip count.
+func fetchUserProfiles(
+	ctx context.Context,
+	client *slackapi.Client,
+	memberIDs map[string]bool,
+	skip map[string]config.PersonConfig,
+	progress func(string),
+) (users []*slackapi.User, skipped int, err error) {
+	fetched := 0
+	total := len(memberIDs)
+
+	for memberID := range memberIDs {
+		if _, exists := skip[memberID]; exists {
+			skipped++
+			continue
+		}
+
+		user, err := client.GetUserInfo(ctx, memberID)
+		if err != nil {
+			continue // skip individual user errors
+		}
+
+		users = append(users, user)
+		fetched++
+
+		progress(fmt.Sprintf("Fetching user profiles... %d/%d", fetched, total))
+
+		if ctx.Err() != nil {
+			return users, skipped, ctx.Err()
+		}
+	}
+
+	return users, skipped, nil
+}
+
+// loadExistingPeople loads existing people.json into a map for merge lookups.
+// Returns an empty map if merge is false or the file doesn't exist.
+func loadExistingPeople(peoplePath string, merge bool) map[string]config.PersonConfig {
+	result := make(map[string]config.PersonConfig)
+	if !merge {
+		return result
+	}
+
+	existing, err := config.LoadPeople(peoplePath)
+	if err != nil {
+		return result
+	}
+
+	for _, p := range existing.People {
+		result[p.SlackID] = p
+	}
+	if len(result) > 0 {
+		fmt.Printf("Loaded %d existing people (will merge)\n", len(result))
+	}
+	return result
+}
+
+// writePeopleJSON converts fetched users to PersonConfig, merges with existing
+// people if needed, and writes the result to disk.
+func writePeopleJSON(path string, fetchedUsers []*slackapi.User, existingPeople map[string]config.PersonConfig, merge bool) (int, error) {
 	newPeople := buildPeopleFromUsers(fetchedUsers)
 
-	// Merge with existing if needed
 	var existingList []config.PersonConfig
 	if merge {
 		for _, p := range existingPeople {
@@ -263,20 +292,17 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 	}
 	people := mergePeople(newPeople, existingList)
 
-	// Write people.json
 	peopleCfg := config.PeopleConfig{People: people}
 	data, err := json.MarshalIndent(peopleCfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal people config: %w", err)
+		return 0, fmt.Errorf("failed to marshal people config: %w", err)
 	}
 
-	if err := os.WriteFile(peoplePath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write people.json: %w", err)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return 0, fmt.Errorf("failed to write people.json: %w", err)
 	}
 
-	fmt.Printf("\nWrote %d people to %s\n", len(people), peoplePath)
-
-	return nil
+	return len(people), nil
 }
 
 // buildPeopleFromUsers converts Slack user info to PersonConfig entries,
@@ -304,11 +330,9 @@ func mergePeople(newPeople, existingPeople []config.PersonConfig) []config.Perso
 		existing[p.SlackID] = p
 	}
 	var result []config.PersonConfig
-	// Add all existing first
 	for _, p := range existingPeople {
 		result = append(result, p)
 	}
-	// Add new ones that aren't already present
 	for _, p := range newPeople {
 		if _, exists := existing[p.SlackID]; !exists {
 			result = append(result, p)

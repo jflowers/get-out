@@ -14,7 +14,6 @@ import (
 
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/exporter"
-	"github.com/jflowers/get-out/pkg/gdrive"
 	"github.com/jflowers/get-out/pkg/models"
 	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/spf13/cobra"
@@ -108,15 +107,8 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
 
-	// Apply settings as defaults (CLI flags override).
-	// settings.FolderID (set by `get-out init`) takes priority over the legacy
-	// settings.GoogleDriveFolderID field.
-	if exportFolderID == "" && settings.FolderID != "" {
-		exportFolderID = settings.FolderID
-	}
-	if exportFolderID == "" && settings.GoogleDriveFolderID != "" {
-		exportFolderID = settings.GoogleDriveFolderID
-	}
+	// Resolve folder ID from flags and settings
+	exportFolderID = resolveExportFolderID(exportFolderID, settings)
 
 	// Load conversations config
 	configPath := filepath.Join(configDir, "conversations.json")
@@ -172,18 +164,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check prerequisites via SecretStore (handles both keychain and file backends).
-	gdriveCfg := gdrive.DefaultConfig(configDir)
-	if settings.GoogleCredentialsFile != "" {
-		gdriveCfg.CredentialsPath = settings.GoogleCredentialsFile
-		gdriveCfg.TokenPath = filepath.Join(filepath.Dir(settings.GoogleCredentialsFile), "token.json")
-	}
-	if _, err := secretStore.Get(secrets.KeyClientCredentials); err != nil {
-		return fmt.Errorf("Google credentials not found — run: get-out init\n\nDownload credentials.json from Google Cloud Console")
-	}
-	if _, err := secretStore.Get(secrets.KeyOAuthToken); err != nil {
-		fmt.Println("Google authorization required. Run 'get-out auth login' first.")
-		return fmt.Errorf("no Google token found — run: get-out auth login")
+	// Check prerequisites
+	if err := checkExportPrerequisites(settings, secretStore); err != nil {
+		return err
 	}
 
 	// Create context with cancellation
@@ -214,25 +197,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse date range flags into Slack timestamps
-	dateFrom, err := parseDateFlag(exportFrom)
+	dateFrom, dateTo, err := parseDateRange(exportFrom, exportTo)
 	if err != nil {
-		return fmt.Errorf("invalid --from date: %w", err)
-	}
-	dateTo, err := parseDateFlag(exportTo)
-	if err != nil {
-		return fmt.Errorf("invalid --to date: %w", err)
-	}
-	// --to should be end of day (23:59:59)
-	if dateTo != "" {
-		// parseDateFlag always returns "NNNNNNNNNN.000000"; parse the integer
-		// part safely by splitting on "." instead of assuming a fixed length.
-		parts := strings.SplitN(dateTo, ".", 2)
-		ts, err := strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			return fmt.Errorf("internal: failed to parse --to timestamp %q: %w", dateTo, err)
-		}
-		ts += 86400 - 1 // end of day
-		dateTo = fmt.Sprintf("%d.000000", ts)
+		return err
 	}
 
 	exp := exporter.NewExporter(&exporter.ExporterConfig{
@@ -280,27 +247,8 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("export failed: %w", err)
 	}
 
-	// Build summary from results
-	summaries := make([]ExportResultSummary, len(results))
-	for i, r := range results {
-		summaries[i] = ExportResultSummary{
-			Name:            r.Name,
-			MessageCount:    r.MessageCount,
-			DocsCreated:     r.DocsCreated,
-			ThreadsExported: r.ThreadsExported,
-			Error:           r.Error,
-		}
-	}
-
-	rootURL := exp.GetRootFolderURL()
-	showErrors := verbose || debugMode
-	errorCount := formatExportSummary(os.Stdout, summaries, rootURL, showErrors)
-
-	if errorCount > 0 {
-		return fmt.Errorf("%d export(s) failed", errorCount)
-	}
-
-	return nil
+	// Print summary
+	return printExportResults(os.Stdout, results, exp.GetRootFolderURL(), verbose || debugMode)
 }
 
 // selectConversations determines which conversations to export based on
@@ -436,4 +384,74 @@ func parseDateFlag(dateStr string) (string, error) {
 		return "", fmt.Errorf("expected YYYY-MM-DD format, got %q", dateStr)
 	}
 	return fmt.Sprintf("%d.000000", t.Unix()), nil
+}
+
+// printExportResults converts export results to summaries and prints the table.
+func printExportResults(w io.Writer, results []*exporter.ExportResult, rootURL string, showErrors bool) error {
+	summaries := make([]ExportResultSummary, len(results))
+	for i, r := range results {
+		summaries[i] = ExportResultSummary{
+			Name:            r.Name,
+			MessageCount:    r.MessageCount,
+			DocsCreated:     r.DocsCreated,
+			ThreadsExported: r.ThreadsExported,
+			Error:           r.Error,
+		}
+	}
+	errorCount := formatExportSummary(w, summaries, rootURL, showErrors)
+	if errorCount > 0 {
+		return fmt.Errorf("%d export(s) failed", errorCount)
+	}
+	return nil
+}
+
+// checkExportPrerequisites verifies Google credentials and token are available.
+func checkExportPrerequisites(settings *config.Settings, store secrets.SecretStore) error {
+	if settings.GoogleCredentialsFile != "" {
+		// Custom credentials path — still check via store
+	}
+	if _, err := store.Get(secrets.KeyClientCredentials); err != nil {
+		return fmt.Errorf("Google credentials not found — run: get-out init\n\nDownload credentials.json from Google Cloud Console")
+	}
+	if _, err := store.Get(secrets.KeyOAuthToken); err != nil {
+		fmt.Println("Google authorization required. Run 'get-out auth login' first.")
+		return fmt.Errorf("no Google token found — run: get-out auth login")
+	}
+	return nil
+}
+
+// resolveExportFolderID determines the Google Drive folder ID from the CLI flag
+// and settings. The flag takes priority, then settings.FolderID (set by init),
+// then the legacy settings.GoogleDriveFolderID field.
+func resolveExportFolderID(flagValue string, settings *config.Settings) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if settings.FolderID != "" {
+		return settings.FolderID
+	}
+	return settings.GoogleDriveFolderID
+}
+
+// parseDateRange converts --from and --to flag values into Slack timestamp
+// strings. The --to value is adjusted to end-of-day (23:59:59).
+func parseDateRange(from, to string) (dateFrom, dateTo string, err error) {
+	dateFrom, err = parseDateFlag(from)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid --from date: %w", err)
+	}
+	dateTo, err = parseDateFlag(to)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid --to date: %w", err)
+	}
+	if dateTo != "" {
+		parts := strings.SplitN(dateTo, ".", 2)
+		ts, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			return "", "", fmt.Errorf("internal: failed to parse --to timestamp %q: %w", dateTo, err)
+		}
+		ts += 86400 - 1 // end of day
+		dateTo = fmt.Sprintf("%d.000000", ts)
+	}
+	return dateFrom, dateTo, nil
 }
