@@ -384,7 +384,15 @@ func (c *Client) GetConversationInfo(ctx context.Context, channelID string) (*Co
 	return &resp.Channel, nil
 }
 
-// ListConversations retrieves a list of conversations.
+// ListConversations retrieves a paginated list of Slack conversations. The opts
+// parameter controls pagination cursor, conversation types, and archive
+// filtering; opts may be nil for default behavior (up to 200 results, all types).
+//
+// Returns a non-nil *ConversationsListResponse on success, containing the
+// Channels slice and pagination metadata. Returns (nil, error) if the HTTP
+// request fails or the Slack API returns a non-OK response. API errors are
+// classified into typed errors (e.g., *AuthError, *RateLimitError) via
+// classifyError.
 func (c *Client) ListConversations(ctx context.Context, opts *ListConversationsOptions) (*ConversationsListResponse, error) {
 	params := url.Values{}
 	params.Set("limit", "200")
@@ -421,9 +429,17 @@ type ListConversationsOptions struct {
 }
 
 // GetAllMessages retrieves all messages from a conversation, handling pagination.
-// It calls the callback for each batch of messages.
-// oldest and latest are Slack timestamps that bound the query window.
+// oldest and latest are Slack timestamps that bound the query window; pass empty
+// strings to omit bounds.
+//
+// The callback is invoked once per paginated batch, only when the batch contains
+// at least one message. If the callback returns a non-nil error, pagination stops
+// immediately and that error is returned to the caller.
+//
 // Rate limiting and retries are handled centrally by the client's rate limiter.
+//
+// Returns nil on success (all pages consumed and all callbacks returned nil).
+// Returns a non-nil error if any API call fails or the callback returns an error.
 func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, latest string, callback func([]Message) error) error {
 	opts := &HistoryOptions{
 		Limit:  200,
@@ -453,8 +469,18 @@ func (c *Client) GetAllMessages(ctx context.Context, channelID string, oldest, l
 	return nil
 }
 
-// GetAllReplies retrieves all replies in a thread, handling pagination.
+// GetAllReplies retrieves all replies in a thread identified by channelID and
+// threadTS, handling pagination automatically.
+//
+// The callback is invoked once per paginated batch, only when the batch contains
+// at least one message. The first message in the first batch is the thread parent.
+// If the callback returns a non-nil error, pagination stops immediately and that
+// error is returned to the caller.
+//
 // Rate limiting and retries are handled centrally by the client's rate limiter.
+//
+// Returns nil on success (all pages consumed and all callbacks returned nil).
+// Returns a non-nil error if any API call fails or the callback returns an error.
 func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, callback func([]Message) error) error {
 	opts := &RepliesOptions{
 		Limit: 200,
@@ -482,7 +508,13 @@ func (c *Client) GetAllReplies(ctx context.Context, channelID, threadTS string, 
 	return nil
 }
 
-// DownloadFile downloads a file from Slack using the client's authentication.
+// DownloadFile downloads a file from the given URL using the client's
+// authentication token (and browser cookie in browser auth mode).
+//
+// Returns the file contents as a byte slice on success, capped at 50 MB.
+// Returns (nil, error) if the HTTP request cannot be created, the download
+// fails, or the server returns a non-200 status code. Errors are wrapped with
+// context describing the failure stage.
 func (c *Client) DownloadFile(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {

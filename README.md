@@ -382,9 +382,9 @@ The `Gaze quality report` step enforces three hard gates. A PR is **blocked** if
 
 | Gate | Threshold | What it measures |
 |---|---|---|
-| `--max-crapload` | 10 | Maximum number of functions exceeding the CRAP score threshold (complexity × lack of coverage) |
-| `--max-gaze-crapload` | 5 | Maximum number of functions exceeding the GazeCRAP threshold (complexity × lack of contract coverage) |
-| `--min-contract-coverage` | 50% | Minimum average contract coverage — the percentage of contractual side effects that tests actually assert on |
+| `--max-crapload` | 5 | Maximum number of functions exceeding the CRAP score threshold (complexity × lack of coverage) |
+| `--max-gaze-crapload` | 8 | Maximum number of functions exceeding the GazeCRAP threshold (complexity × lack of contract coverage) |
+| `--min-contract-coverage` | 30% | Minimum average contract coverage — the percentage of contractual side effects that tests actually assert on |
 
 ### Reading a Gate Failure
 

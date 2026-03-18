@@ -201,7 +201,14 @@ type SlackLink struct {
 	EndIndex   int
 }
 
-// FindSlackLinks extracts Slack message links from text.
+// FindSlackLinks extracts Slack message links from the given text by matching
+// against the slackMessageLinkPattern regex. It returns a slice of SlackLink
+// structs containing the full URL, channel ID, converted message timestamp,
+// and byte offsets within text.
+//
+// Returns nil (empty slice) if no Slack message links are found or if all
+// matches have malformed timestamps (fewer than 10 characters). Matches with
+// malformed timestamps are silently skipped.
 func FindSlackLinks(text string) []SlackLink {
 	var links []SlackLink
 
@@ -230,7 +237,18 @@ func FindSlackLinks(text string) []SlackLink {
 	return links
 }
 
-// ReplaceSlackLinks replaces Slack message links with Google Docs links.
+// ReplaceSlackLinks replaces Slack message links in text with values returned
+// by linkResolver. For each Slack message link matched by slackMessageLinkPattern,
+// the linkResolver callback is invoked with the extracted channelID and
+// messageTS (converted from Slack's p-prefixed format to dot-separated format).
+//
+// If linkResolver returns a non-empty string, the original link is replaced
+// with that value. If linkResolver returns an empty string, the original link
+// text is preserved. Matches with malformed timestamps (fewer than 10 characters)
+// are left unchanged.
+//
+// Returns the text with all applicable replacements applied. If no links match,
+// the original text is returned unmodified.
 func ReplaceSlackLinks(text string, linkResolver func(channelID, messageTS string) string) string {
 	return slackMessageLinkPattern.ReplaceAllStringFunc(text, func(match string) string {
 		matches := slackMessageLinkPattern.FindStringSubmatch(match)

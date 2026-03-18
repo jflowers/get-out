@@ -416,3 +416,49 @@ func TestDefaultSettings_ContractAssertions(t *testing.T) {
 		t.Errorf("LogLevel = %q, want INFO", s.LogLevel)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3: Confidence-79 gap-specific tests
+// ---------------------------------------------------------------------------
+
+func TestLoadConversations_CorruptJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conversations.json")
+	os.WriteFile(path, []byte("not-valid-json{{{"), 0644)
+
+	cfg, err := LoadConversations(path)
+	// Contract assertion: error returned for corrupt JSON
+	if err == nil {
+		t.Fatal("expected error for corrupt JSON")
+	}
+	// Contract assertion: nil config on error
+	if cfg != nil {
+		t.Error("expected nil config on error")
+	}
+}
+
+func TestLoadConversations_FileNotFound(t *testing.T) {
+	cfg, err := LoadConversations("/nonexistent/path/conversations.json")
+	// Contract assertion: error returned for missing file
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	// Contract assertion: nil config on error
+	if cfg != nil {
+		t.Error("expected nil config on error")
+	}
+}
+
+func TestDefaultSettings_DistinctInstances(t *testing.T) {
+	a := DefaultSettings()
+	b := DefaultSettings()
+	// Contract assertion: returns distinct instances (not shared pointer)
+	if a == b {
+		t.Error("DefaultSettings should return distinct pointers")
+	}
+	// Contract assertion: mutation isolation
+	a.LogLevel = "DEBUG"
+	if b.LogLevel != "INFO" {
+		t.Errorf("mutation leaked between instances: b.LogLevel = %q, want 'INFO'", b.LogLevel)
+	}
+}

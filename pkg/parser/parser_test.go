@@ -910,3 +910,73 @@ func TestFindSlackLinks_ExactlyTenDigitTimestamp(t *testing.T) {
 		t.Errorf("MessageTS = %q, want %q", links[0].MessageTS, "1234567890.")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2: Boundary contract tests — PersonResolver, FindSlackLinks, ReplaceSlackLinks
+// ---------------------------------------------------------------------------
+
+func TestNewPersonResolver_DuplicateSlackID(t *testing.T) {
+	people := &config.PeopleConfig{
+		People: []config.PersonConfig{
+			{SlackID: "U001", DisplayName: "First", GoogleEmail: "first@example.com"},
+			{SlackID: "U001", DisplayName: "Second", GoogleEmail: "second@example.com"},
+		},
+	}
+	pr := NewPersonResolver(people)
+
+	// Contract assertion: last entry wins for duplicate SlackIDs
+	if got := pr.ResolveName("U001"); got != "Second" {
+		t.Errorf("ResolveName(U001) = %q, want 'Second'", got)
+	}
+	if got := pr.ResolveEmail("U001"); got != "second@example.com" {
+		t.Errorf("ResolveEmail(U001) = %q, want 'second@example.com'", got)
+	}
+	// Contract assertion: only 1 email entry for deduplicated ID
+	if pr.Count() != 1 {
+		t.Errorf("Count() = %d, want 1", pr.Count())
+	}
+}
+
+func TestFindSlackLinks_EmptyString(t *testing.T) {
+	links := FindSlackLinks("")
+	// Contract assertion: empty input returns zero-length result
+	if len(links) != 0 {
+		t.Errorf("expected 0 links for empty string, got %d", len(links))
+	}
+}
+
+func TestReplaceSlackLinks_EmptyText(t *testing.T) {
+	got := ReplaceSlackLinks("", func(_, _ string) string { return "replaced" })
+	// Contract assertion: empty input returns empty string
+	if got != "" {
+		t.Errorf("expected empty string, got %q", got)
+	}
+}
+
+func TestReplaceSlackLinks_NoSlackURLs(t *testing.T) {
+	text := "Just regular text with no Slack URLs whatsoever"
+	got := ReplaceSlackLinks(text, func(_, _ string) string { return "replaced" })
+	// Contract assertion: text unchanged when no Slack URLs present
+	if got != text {
+		t.Errorf("expected unchanged text, got %q", got)
+	}
+}
+
+func TestReplaceSlackLinks_ResolverArguments(t *testing.T) {
+	var gotChannelID, gotMessageTS string
+	text := "Check https://team.slack.com/archives/C999/p1706745603123456 for details"
+	ReplaceSlackLinks(text, func(channelID, messageTS string) string {
+		gotChannelID = channelID
+		gotMessageTS = messageTS
+		return ""
+	})
+
+	// Contract assertion: correct channelID passed to resolver
+	if gotChannelID != "C999" {
+		t.Errorf("resolver channelID = %q, want C999", gotChannelID)
+	}
+	// Contract assertion: correct messageTS passed to resolver (dot-separated)
+	if gotMessageTS != "1706745603.123456" {
+		t.Errorf("resolver messageTS = %q, want 1706745603.123456", gotMessageTS)
+	}
+}

@@ -45,7 +45,12 @@ func LoadSettings(path string) (*Settings, error) {
 	return settings, nil
 }
 
-// LoadConversations loads and validates conversations.json.
+// LoadConversations loads and validates conversations.json from the given path.
+// It returns a non-nil *ConversationsConfig on success with all conversation
+// entries validated and defaults applied.
+// It returns (nil, error) if the file cannot be read, the JSON is malformed,
+// or any conversation entry fails validation. Errors are wrapped with context
+// describing the failure stage (read, parse, or validation at a specific index).
 func LoadConversations(path string) (*ConversationsConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

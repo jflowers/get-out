@@ -134,3 +134,36 @@ func TestSlackapiGetDisplayName_Priority(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3: Confidence-79 gap-specific tests
+// ---------------------------------------------------------------------------
+
+func TestChannelResolver_Resolve_ContractAssertions(t *testing.T) {
+	r := NewChannelResolver()
+
+	// Contract: unknown ID returns the ID itself, not empty string
+	got := r.Resolve("C_UNKNOWN")
+	if got != "C_UNKNOWN" {
+		t.Errorf("Resolve(unknown) = %q, want raw ID", got)
+	}
+	if got == "" {
+		t.Error("Resolve must never return empty string for non-empty input")
+	}
+
+	// Contract: known ID returns the name, not the ID
+	r.AddChannel("C123", "general")
+	got = r.Resolve("C123")
+	if got != "general" {
+		t.Errorf("Resolve(C123) = %q, want 'general'", got)
+	}
+	if got == "C123" {
+		t.Error("Resolve should return name, not ID, for known channels")
+	}
+
+	// Contract: empty string ID returns empty string
+	got = r.Resolve("")
+	if got != "" {
+		t.Errorf("Resolve('') = %q, want empty", got)
+	}
+}

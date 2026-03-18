@@ -69,7 +69,14 @@ func IsRateLimitError(err error) bool {
 	return ok
 }
 
-// IsAuthError checks if an error is an authentication error.
+// IsAuthError reports whether err is an authentication-related error. It returns
+// true if err is of type *AuthError, or if err is of type *APIError with a Code
+// matching ErrCodeInvalidAuth, ErrCodeTokenRevoked, ErrCodeAccountInactive, or
+// ErrCodeNotAuthed.
+//
+// Returns false if err is nil or does not match any authentication error type.
+// This function does not unwrap error chains; only the immediate error type is
+// checked.
 func IsAuthError(err error) bool {
 	_, ok := err.(*AuthError)
 	if ok {
@@ -84,7 +91,14 @@ func IsAuthError(err error) bool {
 	return false
 }
 
-// IsNotFoundError checks if an error is a not found error.
+// IsNotFoundError reports whether err is a not-found error. It returns true if
+// err is of type *NotFoundError, or if err is of type *APIError with a Code
+// matching ErrCodeChannelNotFound, ErrCodeUserNotFound, ErrCodeThreadNotFound,
+// or ErrCodeMessageNotFound.
+//
+// Returns false if err is nil or does not match any not-found error type.
+// This function does not unwrap error chains; only the immediate error type is
+// checked.
 func IsNotFoundError(err error) bool {
 	_, ok := err.(*NotFoundError)
 	if ok {

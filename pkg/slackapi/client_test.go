@@ -1466,3 +1466,401 @@ func TestGetAllReplies_EmptyResponse(t *testing.T) {
 		t.Error("callback should not be called for empty messages")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Contract coverage tests: parameter forwarding and edge cases
+// ---------------------------------------------------------------------------
+
+func TestGetAllMessages_ForwardsOldestLatest(t *testing.T) {
+	var gotOldest, gotLatest string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.history": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotOldest = r.FormValue("oldest")
+			gotLatest = r.FormValue("latest")
+			json.NewEncoder(w).Encode(HistoryResponse{
+				OK:       true,
+				Messages: []Message{{Text: "msg", TS: "100.001"}},
+				HasMore:  false,
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	err := client.GetAllMessages(context.Background(), "C123",
+		"1700000000.000000", "1700100000.000000",
+		func(msgs []Message) error { return nil })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: oldest parameter forwarded to HTTP request
+	if gotOldest != "1700000000.000000" {
+		t.Errorf("expected oldest='1700000000.000000', got %q", gotOldest)
+	}
+	// Contract assertion: latest parameter forwarded to HTTP request
+	if gotLatest != "1700100000.000000" {
+		t.Errorf("expected latest='1700100000.000000', got %q", gotLatest)
+	}
+}
+
+func TestGetAllMessages_EmptyPageSkipsCallback(t *testing.T) {
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.history": func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(HistoryResponse{
+				OK:       true,
+				Messages: []Message{}, // zero messages
+				HasMore:  false,
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	called := false
+	err := client.GetAllMessages(context.Background(), "C123", "", "", func(msgs []Message) error {
+		called = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: callback not invoked when page has zero messages
+	if called {
+		t.Error("callback should not be invoked for empty messages page")
+	}
+}
+
+func TestGetAllReplies_ForwardsThreadTS(t *testing.T) {
+	var gotTS string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.replies": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotTS = r.FormValue("ts")
+			json.NewEncoder(w).Encode(RepliesResponse{
+				OK:       true,
+				Messages: []Message{{Text: "reply", TS: "100.002"}},
+				HasMore:  false,
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	err := client.GetAllReplies(context.Background(), "C123", "1700000000.123456",
+		func(msgs []Message) error { return nil })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: threadTS forwarded as 'ts' form parameter
+	if gotTS != "1700000000.123456" {
+		t.Errorf("expected ts='1700000000.123456', got %q", gotTS)
+	}
+}
+
+func TestListConversations_ExcludeArchived(t *testing.T) {
+	var gotExcludeArchived string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.list": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotExcludeArchived = r.FormValue("exclude_archived")
+			json.NewEncoder(w).Encode(ConversationsListResponse{
+				OK:       true,
+				Channels: []Conversation{},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	_, err := client.ListConversations(context.Background(), &ListConversationsOptions{
+		ExcludeArchived: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: exclude_archived parameter forwarded
+	if gotExcludeArchived != "true" {
+		t.Errorf("expected exclude_archived='true', got %q", gotExcludeArchived)
+	}
+}
+
+func TestListConversations_NilOptions(t *testing.T) {
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.list": func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(ConversationsListResponse{
+				OK:       true,
+				Channels: []Conversation{{ID: "C001", Name: "test"}},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	// Contract assertion: nil options must not panic
+	resp, err := client.ListConversations(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: valid response returned
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if len(resp.Channels) != 1 {
+		t.Errorf("expected 1 channel, got %d", len(resp.Channels))
+	}
+}
+
+func TestListConversations_DefaultLimit(t *testing.T) {
+	var gotLimit string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.list": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotLimit = r.FormValue("limit")
+			json.NewEncoder(w).Encode(ConversationsListResponse{
+				OK:       true,
+				Channels: []Conversation{},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	_, err := client.ListConversations(context.Background(), &ListConversationsOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: default limit is 200
+	if gotLimit != "200" {
+		t.Errorf("expected limit='200', got %q", gotLimit)
+	}
+}
+
+func TestListConversations_ReturnValueAssertions(t *testing.T) {
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.list": func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(ConversationsListResponse{
+				OK: true,
+				Channels: []Conversation{
+					{ID: "C001", Name: "general"},
+					{ID: "C002", Name: "random"},
+				},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	resp, err := client.ListConversations(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: correct number of channels returned
+	if len(resp.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(resp.Channels))
+	}
+	// Contract assertion: each channel has populated ID and Name fields
+	if resp.Channels[0].ID != "C001" {
+		t.Errorf("expected first channel ID='C001', got %q", resp.Channels[0].ID)
+	}
+	if resp.Channels[0].Name != "general" {
+		t.Errorf("expected first channel Name='general', got %q", resp.Channels[0].Name)
+	}
+	if resp.Channels[1].ID != "C002" {
+		t.Errorf("expected second channel ID='C002', got %q", resp.Channels[1].ID)
+	}
+	if resp.Channels[1].Name != "random" {
+		t.Errorf("expected second channel Name='random', got %q", resp.Channels[1].Name)
+	}
+}
+
+func TestDownloadFile_SizeCap(t *testing.T) {
+	// The maxFileSize constant is 50 * 1024 * 1024 = 52428800 bytes
+	const maxFileSize = 50 * 1024 * 1024
+	// Create a response body slightly larger than the cap
+	oversizeLen := maxFileSize + 1024
+
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/files/large": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			// Write oversizeLen bytes of zeros
+			buf := make([]byte, 32*1024) // write in 32KB chunks
+			written := 0
+			for written < oversizeLen {
+				toWrite := len(buf)
+				if written+toWrite > oversizeLen {
+					toWrite = oversizeLen - written
+				}
+				w.Write(buf[:toWrite])
+				written += toWrite
+			}
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	data, err := client.DownloadFile(context.Background(), server.URL+"/files/large")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: downloaded data is capped at maxFileSize
+	if len(data) > maxFileSize {
+		t.Errorf("expected data length <= %d, got %d", maxFileSize, len(data))
+	}
+	if len(data) != maxFileSize {
+		t.Errorf("expected exactly %d bytes (cap), got %d", maxFileSize, len(data))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Parameter forwarding and branch path contract tests
+// ---------------------------------------------------------------------------
+
+func TestGetAllMessages_ForwardsChannelID(t *testing.T) {
+	var gotChannel string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.history": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotChannel = r.FormValue("channel")
+			json.NewEncoder(w).Encode(HistoryResponse{
+				OK:       true,
+				Messages: []Message{{Text: "msg", TS: "100.001"}},
+				HasMore:  false,
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	_ = client.GetAllMessages(context.Background(), "C_TARGET", "", "", func(msgs []Message) error {
+		return nil
+	})
+
+	// Contract assertion: channelID forwarded to HTTP request
+	if gotChannel != "C_TARGET" {
+		t.Errorf("expected channel=C_TARGET, got %q", gotChannel)
+	}
+}
+
+func TestGetAllMessages_HasMoreWithEmptyCursor(t *testing.T) {
+	var callCount int32
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.history": func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&callCount, 1)
+			json.NewEncoder(w).Encode(HistoryResponse{
+				OK:       true,
+				Messages: []Message{{Text: "msg", TS: "100.001"}},
+				HasMore:  true,
+				// NextCursor is intentionally empty — should terminate pagination
+				ResponseMetadata: ResponseMetadata{NextCursor: ""},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	var cbCount int
+	_ = client.GetAllMessages(context.Background(), "C1", "", "", func(msgs []Message) error {
+		cbCount++
+		return nil
+	})
+
+	// Contract assertion: terminates after single batch when HasMore=true but cursor empty
+	if cbCount != 1 {
+		t.Errorf("expected 1 callback invocation, got %d", cbCount)
+	}
+	if got := atomic.LoadInt32(&callCount); got != 1 {
+		t.Errorf("expected 1 API call, got %d (infinite loop?)", got)
+	}
+}
+
+func TestGetAllReplies_ForwardsChannelID(t *testing.T) {
+	var gotChannel string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.replies": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotChannel = r.FormValue("channel")
+			json.NewEncoder(w).Encode(RepliesResponse{
+				OK:       true,
+				Messages: []Message{{Text: "reply", TS: "100.002"}},
+				HasMore:  false,
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	_ = client.GetAllReplies(context.Background(), "C_REPLIES", "100.001", func(msgs []Message) error {
+		return nil
+	})
+
+	// Contract assertion: channelID forwarded to HTTP request
+	if gotChannel != "C_REPLIES" {
+		t.Errorf("expected channel=C_REPLIES, got %q", gotChannel)
+	}
+}
+
+func TestListConversations_EmptyTypesSlice(t *testing.T) {
+	var gotTypes string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/conversations.list": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotTypes = r.FormValue("types")
+			json.NewEncoder(w).Encode(ConversationsListResponse{
+				OK:       true,
+				Channels: []Conversation{},
+			})
+		},
+	})
+	defer server.Close()
+
+	client := newBrowserTestClient(server)
+	_, err := client.ListConversations(context.Background(), &ListConversationsOptions{
+		Types: []string{}, // empty slice, not nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: empty types slice does not send types param
+	if gotTypes != "" {
+		t.Errorf("expected no types param for empty slice, got %q", gotTypes)
+	}
+}
+
+func TestDownloadFile_APIModeNoCookie(t *testing.T) {
+	var gotAuth, gotCookie string
+	server := newTestServer(t, map[string]http.HandlerFunc{
+		"/files/download": func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			gotCookie = r.Header.Get("Cookie")
+			w.Write([]byte("ok"))
+		},
+	})
+	defer server.Close()
+
+	client := newAPITestClient(server)
+	data, err := client.DownloadFile(context.Background(), server.URL+"/files/download")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: API mode does not send Cookie header
+	if gotCookie != "" {
+		t.Errorf("expected no Cookie header in API mode, got %q", gotCookie)
+	}
+	// Contract assertion: auth header is still present
+	if gotAuth != "Bearer test-token" {
+		t.Errorf("expected Authorization='Bearer test-token', got %q", gotAuth)
+	}
+	// Contract assertion: data is returned
+	if string(data) != "ok" {
+		t.Errorf("expected data='ok', got %q", string(data))
+	}
+}

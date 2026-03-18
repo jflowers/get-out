@@ -132,7 +132,13 @@ func (c *Client) CreateNestedFolders(ctx context.Context, parentID string, names
 	return lastFolder, nil
 }
 
-// ListFolders lists all folders within a parent folder.
+// ListFolders lists all non-trashed folders within the specified parent folder,
+// handling pagination automatically. If parentID is empty, all non-trashed
+// folders accessible to the authenticated user are returned.
+//
+// Returns a slice of *FolderInfo on success. Returns an empty (nil) slice if no
+// folders are found -- this is not an error condition. Returns (nil, error) if
+// the Drive API call fails. Errors are wrapped with context.
 func (c *Client) ListFolders(ctx context.Context, parentID string) ([]*FolderInfo, error) {
 	query := fmt.Sprintf("mimeType = '%s' and trashed = false", MimeTypeFolder)
 	if parentID != "" {

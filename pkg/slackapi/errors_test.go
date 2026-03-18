@@ -260,3 +260,37 @@ func TestIsRateLimitError_ContractAssertions(t *testing.T) {
 		t.Errorf("IsRateLimitError(AuthError) = %v, want false", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2: Boundary/nil input contract tests
+// ---------------------------------------------------------------------------
+
+func TestIsAuthError_NilInput(t *testing.T) {
+	// Contract assertion: nil error returns false
+	if IsAuthError(nil) {
+		t.Error("IsAuthError(nil) = true, want false")
+	}
+}
+
+func TestIsAuthError_WrappedError(t *testing.T) {
+	wrapped := fmt.Errorf("wrapped: %w", &AuthError{Code: "invalid_auth"})
+	// Contract assertion: wrapped errors return false (no errors.As used)
+	if IsAuthError(wrapped) {
+		t.Error("IsAuthError(wrapped AuthError) = true, want false (no errors.As)")
+	}
+}
+
+func TestIsNotFoundError_NilInput(t *testing.T) {
+	// Contract assertion: nil error returns false
+	if IsNotFoundError(nil) {
+		t.Error("IsNotFoundError(nil) = true, want false")
+	}
+}
+
+func TestIsNotFoundError_WrappedError(t *testing.T) {
+	wrapped := fmt.Errorf("wrapped: %w", &NotFoundError{ResourceType: "channel", ResourceID: "C1"})
+	// Contract assertion: wrapped errors return false (no errors.As)
+	if IsNotFoundError(wrapped) {
+		t.Error("IsNotFoundError(wrapped) = true, want false (no errors.As)")
+	}
+}

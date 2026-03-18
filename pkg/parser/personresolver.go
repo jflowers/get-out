@@ -9,7 +9,11 @@ type PersonResolver struct {
 	names  map[string]string // Slack user ID → display name
 }
 
-// NewPersonResolver creates a new person resolver from people config.
+// NewPersonResolver creates a new PersonResolver from the given people config.
+// It always returns a non-nil *PersonResolver. If people is nil, the returned
+// resolver contains empty mappings and all lookups will return empty strings.
+// If people is non-nil, entries with non-empty GoogleEmail or DisplayName fields
+// are indexed by SlackID for subsequent resolution.
 func NewPersonResolver(people *config.PeopleConfig) *PersonResolver {
 	emails := make(map[string]string)
 	names := make(map[string]string)

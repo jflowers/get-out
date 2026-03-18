@@ -237,7 +237,14 @@ type MembersResponse struct {
 	ResponseMetadata ResponseMetadata `json:"response_metadata"`
 }
 
-// TSToTime converts a Slack timestamp to time.Time.
+// TSToTime converts a Slack timestamp string (e.g., "1234567890.123456") to a
+// time.Time value. The timestamp is interpreted as Unix seconds with an optional
+// dot-separated microsecond suffix.
+//
+// If ts contains no dot separator, the entire string is parsed as Unix seconds
+// with zero microseconds. If ts is empty or contains no valid digits, the
+// returned time is the Unix epoch (time.Unix(0, 0)). This function never
+// returns an error; malformed input produces a zero-epoch time.
 func TSToTime(ts string) time.Time {
 	// Slack timestamps are Unix seconds with microseconds: "1234567890.123456"
 	var sec, usec int64

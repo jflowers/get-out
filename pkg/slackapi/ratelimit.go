@@ -62,8 +62,18 @@ func (rl *RateLimiter) getOrCreate(endpoint string) *endpointState {
 	return s
 }
 
-// Wait blocks until the endpoint's interval has elapsed since its last request.
-// Returns ctx.Err() if the context is cancelled while waiting.
+// Wait blocks until the endpoint's rate-limit interval has elapsed since its
+// last request. It mutates the endpoint's lastRequest timestamp to reserve a
+// time slot, even before the wait completes, preventing concurrent callers
+// from overlapping.
+//
+// If no wait is needed (enough time has already elapsed), it returns nil
+// immediately without blocking. If debug mode is enabled, wait durations are
+// logged to stderr.
+//
+// Returns nil on success. Returns ctx.Err() if the context is cancelled while
+// waiting. The endpoint state is updated regardless of whether the wait
+// completes or is cancelled.
 func (rl *RateLimiter) Wait(ctx context.Context, endpoint string) error {
 	rl.mu.Lock()
 	s := rl.getOrCreate(endpoint)

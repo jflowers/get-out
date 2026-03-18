@@ -1282,3 +1282,1187 @@ func TestBatchAppendMessages_WithLinks(t *testing.T) {
 		t.Error("expected a link annotation for 'https://example.com/doc' in batch requests")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// InsertFormattedContent contract tests
+// ---------------------------------------------------------------------------
+
+func TestInsertFormattedContent_Italic(t *testing.T) {
+	var capturedRequests []interface{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	content := []FormattedText{
+		{Text: "italic text", Italic: true},
+	}
+
+	err := c.InsertFormattedContent(context.Background(), "doc1", content, 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: InsertText + UpdateTextStyle for italic
+	if len(capturedRequests) != 2 {
+		t.Fatalf("expected 2 requests (insert + style), got %d", len(capturedRequests))
+	}
+
+	// Contract assertion: second request is UpdateTextStyle with italic=true
+	req1 := capturedRequests[1].(map[string]interface{})
+	updateStyle, ok := req1["updateTextStyle"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected second request to be updateTextStyle")
+	}
+
+	textStyle := updateStyle["textStyle"].(map[string]interface{})
+	if textStyle["italic"] != true {
+		t.Error("expected italic=true in textStyle")
+	}
+
+	// Contract assertion: field mask includes "italic"
+	if updateStyle["fields"] != "italic" {
+		t.Errorf("expected fields='italic', got %v", updateStyle["fields"])
+	}
+}
+
+func TestInsertFormattedContent_Monospace(t *testing.T) {
+	var capturedRequests []interface{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	content := []FormattedText{
+		{Text: "code snippet", Monospace: true},
+	}
+
+	err := c.InsertFormattedContent(context.Background(), "doc1", content, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(capturedRequests) != 2 {
+		t.Fatalf("expected 2 requests (insert + style), got %d", len(capturedRequests))
+	}
+
+	// Contract assertion: UpdateTextStyle has WeightedFontFamily with "Courier New"
+	req1 := capturedRequests[1].(map[string]interface{})
+	updateStyle := req1["updateTextStyle"].(map[string]interface{})
+	textStyle := updateStyle["textStyle"].(map[string]interface{})
+
+	wff, ok := textStyle["weightedFontFamily"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected weightedFontFamily in textStyle")
+	}
+	if wff["fontFamily"] != "Courier New" {
+		t.Errorf("expected fontFamily='Courier New', got %v", wff["fontFamily"])
+	}
+
+	// Contract assertion: field mask includes "weightedFontFamily"
+	if updateStyle["fields"] != "weightedFontFamily" {
+		t.Errorf("expected fields='weightedFontFamily', got %v", updateStyle["fields"])
+	}
+}
+
+func TestInsertFormattedContent_Combined(t *testing.T) {
+	var capturedRequests []interface{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	content := []FormattedText{
+		{Text: "styled link", Bold: true, Italic: true, Link: "https://example.com"},
+	}
+
+	err := c.InsertFormattedContent(context.Background(), "doc1", content, 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: InsertText + single UpdateTextStyle
+	if len(capturedRequests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(capturedRequests))
+	}
+
+	req1 := capturedRequests[1].(map[string]interface{})
+	updateStyle := req1["updateTextStyle"].(map[string]interface{})
+	textStyle := updateStyle["textStyle"].(map[string]interface{})
+
+	// Contract assertion: all three formatting properties present
+	if textStyle["bold"] != true {
+		t.Error("expected bold=true")
+	}
+	if textStyle["italic"] != true {
+		t.Error("expected italic=true")
+	}
+	link, ok := textStyle["link"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected link in textStyle")
+	}
+	if link["url"] != "https://example.com" {
+		t.Errorf("expected link url 'https://example.com', got %v", link["url"])
+	}
+
+	// Contract assertion: field mask includes all three
+	fields := updateStyle["fields"].(string)
+	if !strings.Contains(fields, "bold") {
+		t.Error("expected fields to contain 'bold'")
+	}
+	if !strings.Contains(fields, "italic") {
+		t.Error("expected fields to contain 'italic'")
+	}
+	if !strings.Contains(fields, "link") {
+		t.Error("expected fields to contain 'link'")
+	}
+}
+
+func TestInsertFormattedContent_MultipleSegments(t *testing.T) {
+	var capturedRequests []interface{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	content := []FormattedText{
+		{Text: "normal "},
+		{Text: "bold", Bold: true},
+		{Text: " end"},
+	}
+
+	err := c.InsertFormattedContent(context.Background(), "doc1", content, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: reverse order insertion means last segment first
+	// 3 InsertText + 1 UpdateTextStyle (for "bold") = 4 requests
+	// Segments are inserted in reverse: " end", then "bold"+style, then "normal "
+	if len(capturedRequests) != 4 {
+		t.Fatalf("expected 4 requests (3 inserts + 1 style), got %d", len(capturedRequests))
+	}
+
+	// Contract assertion: first request is InsertText for " end" (last segment)
+	req0 := capturedRequests[0].(map[string]interface{})
+	insert0 := req0["insertText"].(map[string]interface{})
+	if insert0["text"] != " end" {
+		t.Errorf("expected first insert to be ' end', got %v", insert0["text"])
+	}
+
+	// Contract assertion: second request is InsertText for "bold"
+	req1 := capturedRequests[1].(map[string]interface{})
+	insert1 := req1["insertText"].(map[string]interface{})
+	if insert1["text"] != "bold" {
+		t.Errorf("expected second insert to be 'bold', got %v", insert1["text"])
+	}
+
+	// Contract assertion: third request is UpdateTextStyle for "bold"
+	req2 := capturedRequests[2].(map[string]interface{})
+	if _, ok := req2["updateTextStyle"]; !ok {
+		t.Error("expected third request to be updateTextStyle")
+	}
+
+	// Contract assertion: fourth request is InsertText for "normal "
+	req3 := capturedRequests[3].(map[string]interface{})
+	insert3 := req3["insertText"].(map[string]interface{})
+	if insert3["text"] != "normal " {
+		t.Errorf("expected fourth insert to be 'normal ', got %v", insert3["text"])
+	}
+}
+
+func TestInsertFormattedContent_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    500,
+				"message": "internal server error",
+			},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	content := []FormattedText{
+		{Text: "some text", Bold: true},
+	}
+
+	err := c.InsertFormattedContent(context.Background(), "doc1", content, 1)
+	// Contract assertion: API errors are propagated
+	if err == nil {
+		t.Fatal("expected error for HTTP 500, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BatchAppendMessages contract tests
+// ---------------------------------------------------------------------------
+
+func TestBatchAppendMessages_WithImages(t *testing.T) {
+	docResp := map[string]interface{}{
+		"documentId": "doc1",
+		"body": map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"endIndex": 2,
+					"paragraph": map[string]interface{}{
+						"elements": []map[string]interface{}{
+							{"textRun": map[string]interface{}{"content": "\n"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var capturedRequests []interface{}
+
+	mux := docsMux(t, docResp, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	messages := []MessageBlock{
+		{
+			SenderName: "Alice",
+			Timestamp:  "2024-01-15 10:30",
+			Content:    "Check this image",
+			Images: []ImageAnnotation{
+				{URL: "https://example.com/image.png"},
+			},
+		},
+	}
+
+	err := c.BatchAppendMessages(context.Background(), "doc1", messages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: should contain an InsertInlineImage request
+	foundImage := false
+	for _, req := range capturedRequests {
+		r := req.(map[string]interface{})
+		if img, ok := r["insertInlineImage"].(map[string]interface{}); ok {
+			foundImage = true
+			// Contract assertion: image URL matches
+			if img["uri"] != "https://example.com/image.png" {
+				t.Errorf("expected image URI 'https://example.com/image.png', got %v", img["uri"])
+			}
+		}
+	}
+	if !foundImage {
+		t.Error("expected an InsertInlineImage request for the image annotation")
+	}
+
+	// Contract assertion: image is surrounded by newline InsertText requests
+	// Find the position of InsertInlineImage and verify adjacent newlines
+	for i, req := range capturedRequests {
+		r := req.(map[string]interface{})
+		if _, ok := r["insertInlineImage"]; ok {
+			// Check preceding request is a newline insert
+			if i > 0 {
+				prev := capturedRequests[i-1].(map[string]interface{})
+				if it, ok := prev["insertText"].(map[string]interface{}); ok {
+					if it["text"] != "\n" {
+						t.Errorf("expected newline before image, got %q", it["text"])
+					}
+				}
+			}
+			// Check following request is a newline insert
+			if i+1 < len(capturedRequests) {
+				next := capturedRequests[i+1].(map[string]interface{})
+				if it, ok := next["insertText"].(map[string]interface{}); ok {
+					if it["text"] != "\n" {
+						t.Errorf("expected newline after image, got %q", it["text"])
+					}
+				}
+			}
+			break
+		}
+	}
+}
+
+func TestBatchAppendMessages_MultipleMessages(t *testing.T) {
+	docResp := map[string]interface{}{
+		"documentId": "doc1",
+		"body": map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"endIndex": 2,
+					"paragraph": map[string]interface{}{
+						"elements": []map[string]interface{}{
+							{"textRun": map[string]interface{}{"content": "\n"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var capturedRequests []interface{}
+
+	mux := docsMux(t, docResp, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	messages := []MessageBlock{
+		{SenderName: "Alice", Timestamp: "10:00", Content: "First message"},
+		{SenderName: "Bob", Timestamp: "10:05", Content: "Second message"},
+	}
+
+	err := c.BatchAppendMessages(context.Background(), "doc1", messages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: both messages are present in the batch
+	// Each message produces: InsertText(header) + UpdateTextStyle(bold) + InsertText(body) = 3 requests
+	// 2 messages = at least 6 requests
+	if len(capturedRequests) < 6 {
+		t.Fatalf("expected at least 6 requests for 2 messages, got %d", len(capturedRequests))
+	}
+
+	// Contract assertion: both sender names appear in InsertText requests
+	foundAlice, foundBob := false, false
+	for _, req := range capturedRequests {
+		r := req.(map[string]interface{})
+		if it, ok := r["insertText"].(map[string]interface{}); ok {
+			text := it["text"].(string)
+			if strings.Contains(text, "Alice") {
+				foundAlice = true
+			}
+			if strings.Contains(text, "Bob") {
+				foundBob = true
+			}
+		}
+	}
+	if !foundAlice {
+		t.Error("expected InsertText containing 'Alice'")
+	}
+	if !foundBob {
+		t.Error("expected InsertText containing 'Bob'")
+	}
+
+	// Contract assertion: second message's insert indices are higher than first's
+	// The first InsertText is for message 1's header at index 1 (endIndex 2 - 1)
+	// The second message's header insert should be at a higher index
+	firstHeaderIdx := float64(-1)
+	secondHeaderIdx := float64(-1)
+	headerCount := 0
+	for _, req := range capturedRequests {
+		r := req.(map[string]interface{})
+		if it, ok := r["insertText"].(map[string]interface{}); ok {
+			text := it["text"].(string)
+			if strings.Contains(text, "Alice") || strings.Contains(text, "Bob") {
+				loc := it["location"].(map[string]interface{})
+				idx := loc["index"].(float64)
+				if headerCount == 0 {
+					firstHeaderIdx = idx
+				} else {
+					secondHeaderIdx = idx
+				}
+				headerCount++
+			}
+		}
+	}
+	if secondHeaderIdx <= firstHeaderIdx {
+		t.Errorf("expected second message index (%v) > first message index (%v)", secondHeaderIdx, firstHeaderIdx)
+	}
+}
+
+func TestBatchAppendMessages_LinkTextNotInBody(t *testing.T) {
+	docResp := map[string]interface{}{
+		"documentId": "doc1",
+		"body": map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"endIndex": 2,
+					"paragraph": map[string]interface{}{
+						"elements": []map[string]interface{}{
+							{"textRun": map[string]interface{}{"content": "\n"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	var capturedRequests []interface{}
+
+	mux := docsMux(t, docResp, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	messages := []MessageBlock{
+		{
+			SenderName: "Alice",
+			Timestamp:  "10:00",
+			Content:    "Hello world",
+			Links: []LinkAnnotation{
+				{Text: "nonexistent text", URL: "https://example.com"},
+			},
+		},
+	}
+
+	err := c.BatchAppendMessages(context.Background(), "doc1", messages)
+	// Contract assertion: no error even when link text isn't found in body
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: no UpdateTextStyle with link for the missing text
+	for _, req := range capturedRequests {
+		r := req.(map[string]interface{})
+		if us, ok := r["updateTextStyle"].(map[string]interface{}); ok {
+			ts := us["textStyle"].(map[string]interface{})
+			if _, hasLink := ts["link"]; hasLink {
+				// The only UpdateTextStyle with a link should not exist since the link text wasn't found
+				// (there is a bold UpdateTextStyle for the sender name, which is fine)
+				t.Error("unexpected link UpdateTextStyle for text not found in body")
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AppendText error path tests
+// ---------------------------------------------------------------------------
+
+func TestAppendText_GetError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		// Return error for the Documents.Get call
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    500,
+				"message": "server error",
+			},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	err := c.AppendText(context.Background(), "doc1", "some text")
+	// Contract assertion: error is propagated from Documents.Get
+	if err == nil {
+		t.Fatal("expected error when Documents.Get fails, got nil")
+	}
+	// Contract assertion: error wraps with context
+	if !strings.Contains(err.Error(), "failed to get document") {
+		t.Errorf("expected error to contain 'failed to get document', got %q", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetDocumentContent error path tests
+// ---------------------------------------------------------------------------
+
+func TestGetDocumentContent_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    500,
+				"message": "server error",
+			},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	_, err := c.GetDocumentContent(context.Background(), "doc1")
+	// Contract assertion: error is propagated
+	if err == nil {
+		t.Fatal("expected error when API fails, got nil")
+	}
+	// Contract assertion: error contains context message
+	if !strings.Contains(err.Error(), "failed to get document") {
+		t.Errorf("expected error to contain 'failed to get document', got %q", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Boundary and edge case contract tests
+// ---------------------------------------------------------------------------
+
+func TestInsertFormattedContent_NilContent(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("no API call expected for nil content")
+	})
+
+	c := testClient(t, mux)
+	err := c.InsertFormattedContent(context.Background(), "doc1", nil, 10)
+	// Contract assertion: nil content treated like empty (no error, no API call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInsertFormattedContent_UnicodeTextRange(t *testing.T) {
+	var capturedRequests []interface{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		capturedRequests = body["requests"].([]interface{})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	// Emoji 😀 is a surrogate pair = 2 UTF-16 code units
+	content := []FormattedText{
+		{Text: "😀", Bold: true},
+	}
+
+	err := c.InsertFormattedContent(context.Background(), "doc1", content, 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have InsertText + UpdateTextStyle
+	if len(capturedRequests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(capturedRequests))
+	}
+
+	// Contract assertion: UpdateTextStyle range uses UTF-16 length
+	req1 := capturedRequests[1].(map[string]interface{})
+	updateStyle := req1["updateTextStyle"].(map[string]interface{})
+	rng := updateStyle["range"].(map[string]interface{})
+	startIdx := rng["startIndex"].(float64)
+	endIdx := rng["endIndex"].(float64)
+
+	if startIdx != 5 {
+		t.Errorf("expected startIndex 5, got %v", startIdx)
+	}
+	// UTF-16 length of "😀" is 2 (surrogate pair), not 4 (UTF-8 bytes)
+	if endIdx != 7 {
+		t.Errorf("expected endIndex 7 (5 + 2 UTF-16 units for emoji), got %v", endIdx)
+	}
+}
+
+func TestAppendText_NilBody(t *testing.T) {
+	docResp := map[string]interface{}{
+		"documentId": "doc-nil-body",
+		// no "body" key — nil body scenario
+	}
+
+	var capturedIdx float64
+
+	mux := docsMux(t, docResp, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		reqs := body["requests"].([]interface{})
+		req := reqs[0].(map[string]interface{})
+		insertText := req["insertText"].(map[string]interface{})
+		loc := insertText["location"].(map[string]interface{})
+		if v, ok := loc["index"]; ok && v != nil {
+			capturedIdx = v.(float64)
+		} else {
+			capturedIdx = 0
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	err := c.AppendText(context.Background(), "doc-nil-body", "text")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: nil body uses default endIndex=1, so insert at index 1
+	if capturedIdx != 1 {
+		t.Errorf("expected insert at index 1 for nil body, got %v", capturedIdx)
+	}
+}
+
+func TestAppendText_EmptyText(t *testing.T) {
+	docResp := map[string]interface{}{
+		"documentId": "doc1",
+		"body": map[string]interface{}{
+			"content": []map[string]interface{}{
+				{
+					"endIndex": 10,
+					"paragraph": map[string]interface{}{
+						"elements": []map[string]interface{}{
+							{"textRun": map[string]interface{}{"content": "existing\n"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	batchUpdateCalled := false
+
+	mux := docsMux(t, docResp, func(w http.ResponseWriter, r *http.Request) {
+		batchUpdateCalled = true
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		reqs := body["requests"].([]interface{})
+		req := reqs[0].(map[string]interface{})
+		insertText, ok := req["insertText"].(map[string]interface{})
+		if !ok {
+			t.Fatal("expected insertText request")
+		}
+		// Contract assertion: InsertText request is present (even for empty text)
+		if insertText["location"] == nil {
+			t.Error("expected location in insertText request")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"replies": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+
+	err := c.AppendText(context.Background(), "doc1", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: batchUpdate API call is made (function doesn't short-circuit for empty text)
+	if !batchUpdateCalled {
+		t.Error("expected batchUpdate API call for empty text")
+	}
+}
+
+func TestFindDocument_NoFolderID(t *testing.T) {
+	var capturedQ string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
+		capturedQ = r.URL.Query().Get("q")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"files": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+	_, err := c.FindDocument(context.Background(), "test-doc", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: no parent clause when folderID is empty
+	if strings.Contains(capturedQ, "in parents") {
+		t.Errorf("query should not contain parent clause for empty folderID, got %q", capturedQ)
+	}
+}
+
+func TestFindDocument_TitleWithQuotes(t *testing.T) {
+	var capturedQ string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
+		capturedQ = r.URL.Query().Get("q")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"files": []interface{}{},
+		})
+	})
+
+	c := testClient(t, mux)
+	_, err := c.FindDocument(context.Background(), "doc's title", "folder-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: single quotes are escaped in query
+	if strings.Contains(capturedQ, "doc's") {
+		t.Errorf("query should escape single quotes, got %q", capturedQ)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Zero-coverage function tests
+// ---------------------------------------------------------------------------
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig("/home/user/.get-out")
+	// Contract assertion: CredentialsPath correctly joined
+	if cfg.CredentialsPath != "/home/user/.get-out/credentials.json" {
+		t.Errorf("CredentialsPath = %q, want %q", cfg.CredentialsPath, "/home/user/.get-out/credentials.json")
+	}
+	// Contract assertion: TokenPath correctly joined
+	if cfg.TokenPath != "/home/user/.get-out/token.json" {
+		t.Errorf("TokenPath = %q, want %q", cfg.TokenPath, "/home/user/.get-out/token.json")
+	}
+}
+
+func TestGetFolder_Success(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":          "folder-1",
+			"name":        "My Folder",
+			"webViewLink": "https://drive.google.com/drive/folders/folder-1",
+			"mimeType":    MimeTypeFolder,
+		})
+	})
+
+	c := testClient(t, mux)
+	folder, err := c.GetFolder(context.Background(), "folder-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertions: all fields populated
+	if folder.ID != "folder-1" {
+		t.Errorf("ID = %q, want 'folder-1'", folder.ID)
+	}
+	if folder.Name != "My Folder" {
+		t.Errorf("Name = %q, want 'My Folder'", folder.Name)
+	}
+	if folder.URL != "https://drive.google.com/drive/folders/folder-1" {
+		t.Errorf("URL = %q, want drive URL", folder.URL)
+	}
+}
+
+func TestGetFolder_NotAFolder(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":       "file-1",
+			"name":     "document.pdf",
+			"mimeType": "application/pdf",
+		})
+	})
+
+	c := testClient(t, mux)
+	_, err := c.GetFolder(context.Background(), "file-1")
+	// Contract assertion: non-folder MIME type returns error
+	if err == nil {
+		t.Fatal("expected error for non-folder MIME type")
+	}
+	if !strings.Contains(err.Error(), "not a folder") {
+		t.Errorf("error should mention 'not a folder', got %q", err.Error())
+	}
+}
+
+func TestFindOrCreateDocument_CreatesWhenNotFound(t *testing.T) {
+	var createCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet || r.URL.Query().Get("q") != "" {
+			// FindDocument: return empty list
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"files": []interface{}{},
+			})
+			return
+		}
+		// CreateDocument: POST
+		createCalled = true
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":          "new-doc-1",
+			"name":        "New Doc",
+			"webViewLink": "https://docs.google.com/document/d/new-doc-1",
+		})
+	})
+
+	c := testClient(t, mux)
+	doc, err := c.FindOrCreateDocument(context.Background(), "New Doc", "parent-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: create was called
+	if !createCalled {
+		t.Error("expected CreateDocument to be called when not found")
+	}
+	// Contract assertion: returned DocInfo has non-empty ID
+	if doc.ID == "" {
+		t.Error("expected non-empty DocInfo.ID")
+	}
+}
+
+func TestFindOrCreateDocument_ReturnsExisting(t *testing.T) {
+	var createCalled bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet || r.URL.Query().Get("q") != "" {
+			// FindDocument: return existing doc
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"files": []interface{}{
+					map[string]interface{}{
+						"id":          "existing-doc",
+						"name":        "Existing",
+						"webViewLink": "https://docs.google.com/document/d/existing-doc",
+					},
+				},
+			})
+			return
+		}
+		createCalled = true
+		w.WriteHeader(500)
+	})
+
+	c := testClient(t, mux)
+	doc, err := c.FindOrCreateDocument(context.Background(), "Existing", "parent-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: no create call
+	if createCalled {
+		t.Error("CreateDocument should NOT be called when document found")
+	}
+	// Contract assertion: returned ID matches found doc
+	if doc.ID != "existing-doc" {
+		t.Errorf("ID = %q, want 'existing-doc'", doc.ID)
+	}
+}
+
+func TestFindOrCreateFolder_CreatesWhenNotFound(t *testing.T) {
+	requestCount := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet || r.URL.Query().Get("q") != "" {
+			// FindFolder: return empty
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"files": []interface{}{},
+			})
+			return
+		}
+		// CreateFolder: POST
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":          "new-folder",
+			"name":        "Test Folder",
+			"webViewLink": "https://drive.google.com/drive/folders/new-folder",
+		})
+	})
+
+	c := testClient(t, mux)
+	folder, err := c.FindOrCreateFolder(context.Background(), "Test Folder", "parent-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: returned FolderInfo has non-empty ID
+	if folder.ID == "" {
+		t.Error("expected non-empty FolderInfo.ID")
+	}
+	if folder.ID != "new-folder" {
+		t.Errorf("ID = %q, want 'new-folder'", folder.ID)
+	}
+}
+
+func TestCreateNestedFolders_ThreeLevels(t *testing.T) {
+	createCount := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet || r.URL.Query().Get("q") != "" {
+			// FindFolder: always not found
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"files": []interface{}{},
+			})
+			return
+		}
+		// CreateFolder: return sequential IDs
+		createCount++
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":          fmt.Sprintf("folder-%d", createCount),
+			"name":        fmt.Sprintf("Level %d", createCount),
+			"webViewLink": fmt.Sprintf("https://drive.google.com/drive/folders/folder-%d", createCount),
+		})
+	})
+
+	c := testClient(t, mux)
+	folder, err := c.CreateNestedFolders(context.Background(), "root-parent", "A", "B", "C")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: 3 folders created
+	if createCount != 3 {
+		t.Errorf("expected 3 create calls, got %d", createCount)
+	}
+	// Contract assertion: returned folder is the innermost (last created)
+	if folder.ID != "folder-3" {
+		t.Errorf("innermost folder ID = %q, want 'folder-3'", folder.ID)
+	}
+}
+
+func TestDeleteFolder_Success(t *testing.T) {
+	var gotMethod string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "folder-to-delete",
+		})
+	})
+
+	c := testClient(t, mux)
+	err := c.DeleteFolder(context.Background(), "folder-to-delete")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: PATCH method used (update trashed=true)
+	if gotMethod != http.MethodPatch {
+		t.Errorf("expected PATCH method, got %s", gotMethod)
+	}
+}
+
+func TestShareFolder_ReaderPermission(t *testing.T) {
+	var capturedBody map[string]interface{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "permissions") {
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": "perm-1"})
+			return
+		}
+		w.WriteHeader(404)
+	})
+
+	c := testClient(t, mux)
+	err := c.ShareFolder(context.Background(), "folder-1", "user@example.com", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: reader permission
+	if capturedBody["role"] != "reader" {
+		t.Errorf("role = %v, want 'reader'", capturedBody["role"])
+	}
+	if capturedBody["type"] != "user" {
+		t.Errorf("type = %v, want 'user'", capturedBody["type"])
+	}
+}
+
+func TestShareFolderWithWriter_WriterPermission(t *testing.T) {
+	var capturedBody map[string]interface{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "permissions") {
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": "perm-2"})
+			return
+		}
+		w.WriteHeader(404)
+	})
+
+	c := testClient(t, mux)
+	err := c.ShareFolderWithWriter(context.Background(), "folder-1", "writer@example.com", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: writer permission
+	if capturedBody["role"] != "writer" {
+		t.Errorf("role = %v, want 'writer'", capturedBody["role"])
+	}
+	if capturedBody["type"] != "user" {
+		t.Errorf("type = %v, want 'user'", capturedBody["type"])
+	}
+}
+
+func TestUploadFile_Success(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":             "uploaded-file-1",
+			"webContentLink": "https://drive.google.com/uc?id=uploaded-file-1",
+		})
+	})
+
+	c := testClient(t, mux)
+	id, err := c.UploadFile(context.Background(), "test.txt", "text/plain", []byte("hello world"), "parent-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: returned file ID is non-empty
+	if id == "" {
+		t.Error("expected non-empty file ID")
+	}
+	if id != "uploaded-file-1" {
+		t.Errorf("file ID = %q, want 'uploaded-file-1'", id)
+	}
+}
+
+func TestGetWebContentLink_Success(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"webContentLink": "https://drive.google.com/uc?id=file-1&export=download",
+		})
+	})
+
+	c := testClient(t, mux)
+	link, err := c.GetWebContentLink(context.Background(), "file-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: returned link matches server value
+	if link != "https://drive.google.com/uc?id=file-1&export=download" {
+		t.Errorf("link = %q, want download URL", link)
+	}
+}
+
+func TestMakePublic_AnyoneReader(t *testing.T) {
+	var capturedBody map[string]interface{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "permissions") {
+			json.NewDecoder(r.Body).Decode(&capturedBody)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"id": "perm-public"})
+			return
+		}
+		w.WriteHeader(404)
+	})
+
+	c := testClient(t, mux)
+	err := c.MakePublic(context.Background(), "file-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: anyone-reader permission
+	if capturedBody["type"] != "anyone" {
+		t.Errorf("type = %v, want 'anyone'", capturedBody["type"])
+	}
+	if capturedBody["role"] != "reader" {
+		t.Errorf("role = %v, want 'reader'", capturedBody["role"])
+	}
+}
+
+func TestDeleteFile_Success(t *testing.T) {
+	var gotMethod string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	c := testClient(t, mux)
+	err := c.DeleteFile(context.Background(), "file-to-delete")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: DELETE method used
+	if gotMethod != http.MethodDelete {
+		t.Errorf("expected DELETE method, got %s", gotMethod)
+	}
+}
+
+func TestDeleteFile_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    500,
+				"message": "internal error",
+			},
+		})
+	})
+
+	c := testClient(t, mux)
+	err := c.DeleteFile(context.Background(), "file-1")
+	// Contract assertion: API error propagated
+	if err == nil {
+		t.Fatal("expected error for HTTP 500")
+	}
+}

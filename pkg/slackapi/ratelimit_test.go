@@ -279,3 +279,56 @@ func TestDefaultTierIntervals(t *testing.T) {
 		t.Errorf("tier count = %d, want %d", len(tiers), len(expected))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2: Debug path branch test
+// ---------------------------------------------------------------------------
+
+func TestRateLimiter_Wait_DebugPath(t *testing.T) {
+	rl := testLimiter()
+	rl.SetDebug(true)
+
+	// First call — immediate return
+	err := rl.Wait(context.Background(), "fast")
+	if err != nil {
+		t.Fatalf("first Wait() = %v, want nil", err)
+	}
+
+	// Second call — triggers debug logging and wait
+	err = rl.Wait(context.Background(), "fast")
+	// Contract assertion: debug path returns nil (no error)
+	if err != nil {
+		t.Errorf("second Wait() with debug = %v, want nil", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Confidence-79 gap-specific test — observable effect
+// ---------------------------------------------------------------------------
+
+func TestRecordRateLimit_ObservableEffect(t *testing.T) {
+	rl := testLimiter() // "fast" = 50ms
+
+	// Establish baseline — first Wait is immediate
+	err := rl.Wait(context.Background(), "fast")
+	if err != nil {
+		t.Fatalf("first Wait: %v", err)
+	}
+
+	// Record a rate limit — this doubles the interval from 50ms to 100ms
+	rl.RecordRateLimit("fast", 0)
+
+	// The next Wait should block for ~100ms (the doubled interval)
+	start := time.Now()
+	err = rl.Wait(context.Background(), "fast")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Wait after RecordRateLimit: %v", err)
+	}
+
+	// Contract assertion: the doubled interval is observable through Wait
+	if elapsed < 80*time.Millisecond {
+		t.Errorf("Wait after RecordRateLimit took %v, expected >= 80ms (doubled 50ms interval)", elapsed)
+	}
+}

@@ -210,3 +210,23 @@ func TestSlackapiGetDisplayName_Priority(t *testing.T) {
 		t.Errorf("GetDisplayName() = %q, want %q", got, "Johnny")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2: Boundary input contract tests
+// ---------------------------------------------------------------------------
+
+func TestTSToTime_EmptyString(t *testing.T) {
+	got := TSToTime("")
+	// Contract assertion: empty string produces Unix epoch
+	if got.Unix() != 0 {
+		t.Errorf("TSToTime(\"\").Unix() = %d, want 0", got.Unix())
+	}
+}
+
+func TestTSToTime_MalformedInput(t *testing.T) {
+	got := TSToTime("not.a.number")
+	// Contract assertion: malformed input doesn't panic, returns zero-epoch
+	if got.Unix() != 0 {
+		t.Errorf("TSToTime(\"not.a.number\").Unix() = %d, want 0", got.Unix())
+	}
+}

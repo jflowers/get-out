@@ -30,8 +30,19 @@ func NewUserResolver() *UserResolver {
 	}
 }
 
-// LoadUsers fetches all users from Slack and caches them.
-// The optional onProgress callback is called after each batch with current count.
+// LoadUsers fetches all users from Slack via paginated API calls and caches them
+// in the resolver's internal user map.
+//
+// It mutates the receiver by acquiring a write lock and populating r.users with
+// every user returned by the Slack API. Previously cached users for the same IDs
+// are overwritten.
+//
+// The optional onProgress callback, if provided, is invoked after each paginated
+// batch with the cumulative number of cached users. Only the first callback in
+// the variadic slice is used; additional values are ignored.
+//
+// Returns nil on success. Returns a non-nil error if any paginated API call fails
+// or if the context is cancelled between pages.
 func (r *UserResolver) LoadUsers(ctx context.Context, client SlackAPI, onProgress ...func(int)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,9 +114,22 @@ func fetchConversationMembers(ctx context.Context, client SlackAPI, channelID st
 	return nil
 }
 
-// LoadUsersForConversations loads users who are members of the specified conversations.
-// This is much faster than LoadUsers for large workspaces since it only fetches
-// users in the conversations being exported.
+// LoadUsersForConversations loads users who are members of the specified
+// conversations and caches them in the resolver's internal user map. This is
+// much faster than LoadUsers for large workspaces since it only fetches users
+// in the conversations being exported.
+//
+// It mutates the receiver by acquiring a write lock and populating r.users with
+// fetched user records. Users that cannot be individually fetched are silently
+// skipped. Inaccessible conversations are reported via the progress callback
+// (with count -1) and do not cause an error.
+//
+// The optional onProgress callback, if provided, is invoked after each
+// conversation's members are collected (with the channel ID and cumulative
+// member count) and every 50 users fetched (with label "users" and fetch count).
+//
+// Returns nil on success. Returns a non-nil error if the context is cancelled
+// or if fetching conversation members fails with a non-access error.
 func (r *UserResolver) LoadUsersForConversations(ctx context.Context, client SlackAPI, channelIDs []string, onProgress ...func(string, int)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -242,7 +266,14 @@ func (r *ChannelResolver) Resolve(id string) string {
 	return id
 }
 
-// LoadChannels fetches channels from Slack.
+// LoadChannels fetches all public and private channels from Slack via paginated
+// API calls and caches their ID-to-name mappings in the resolver.
+//
+// It mutates the receiver by acquiring a write lock and populating r.channels.
+// Previously cached channel names for the same IDs are overwritten.
+//
+// Returns nil on success. Returns a non-nil error if any paginated API call
+// fails or returns a non-OK response.
 func (r *ChannelResolver) LoadChannels(ctx context.Context, client SlackAPI) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

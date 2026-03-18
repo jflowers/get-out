@@ -588,3 +588,71 @@ func TestClientFromStore_ExpiredNoRefresh_ErrorMessage(t *testing.T) {
 		t.Errorf("error %q should contain 'auth login' hint", err.Error())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ClientFromStore contract tests
+// ---------------------------------------------------------------------------
+
+func TestClientFromStore_BadCredentialsJSON(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+
+	// Write invalid JSON as credentials
+	if err := store.Set(secrets.KeyClientCredentials, "not valid json!!!"); err != nil {
+		t.Fatalf("store.Set: %v", err)
+	}
+
+	// Write a valid token so we get past the token check
+	writeToken(t, store, map[string]any{
+		"access_token":  "ya29.test",
+		"refresh_token": "1//test",
+		"expiry":        time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+	})
+
+	cfg := &Config{}
+	ctx := context.Background()
+
+	client, err := ClientFromStore(ctx, cfg, store)
+	// Contract assertion: error returned for malformed credentials
+	if err == nil {
+		t.Fatal("expected error for bad credentials JSON, got nil")
+	}
+	if client != nil {
+		t.Error("expected nil client on error")
+	}
+	// Contract assertion: error mentions credential parsing
+	if !strings.Contains(err.Error(), "credentials") {
+		t.Errorf("expected error to mention 'credentials', got %q", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Auth edge case contract tests
+// ---------------------------------------------------------------------------
+
+func TestClientFromStore_ExpiredWithRefreshToken(t *testing.T) {
+	t.Parallel()
+	store := testFileStore(t)
+	writeCredentials(t, store)
+	writeToken(t, store, map[string]any{
+		"access_token":  "ya29.expired",
+		"refresh_token": "1//refresh-token",
+		"expiry":        time.Now().Add(-time.Hour).Format(time.RFC3339),
+	})
+
+	cfg := &Config{}
+	ctx := context.Background()
+
+	client, err := ClientFromStore(ctx, cfg, store)
+	// Contract assertion: expired token with refresh token returns client (not error)
+	if err != nil {
+		t.Fatalf("expected success with refresh token, got error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+	// Contract assertion: client has configured transport
+	if client.Transport == nil {
+		t.Error("expected configured transport")
+	}
+}

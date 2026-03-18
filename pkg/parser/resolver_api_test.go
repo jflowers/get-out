@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"sync"
 	"context"
 	"fmt"
 	"testing"
@@ -994,5 +995,248 @@ func TestLoadUsersForConversations_EmptyChannelIDs(t *testing.T) {
 	}
 	if r.Count() != 0 {
 		t.Errorf("expected 0 users, got %d", r.Count())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadChannels contract tests
+// ---------------------------------------------------------------------------
+
+func TestLoadChannels_ContextCancellation(t *testing.T) {
+	calls := 0
+	mock := &mockSlackAPI{
+		listConversationsFunc: func(ctx context.Context, opts *slackapi.ListConversationsOptions) (*slackapi.ConversationsListResponse, error) {
+			calls++
+			if calls == 1 {
+				return &slackapi.ConversationsListResponse{
+					OK: true,
+					Channels: []slackapi.Conversation{
+						{ID: "C001", Name: "general"},
+					},
+					ResponseMetadata: slackapi.ResponseMetadata{NextCursor: "page2"},
+				}, nil
+			}
+			// On second call, check that context is cancelled
+			return nil, ctx.Err()
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Wrap the mock to cancel context after first call
+	wrappedMock := &mockSlackAPI{
+		listConversationsFunc: func(c context.Context, opts *slackapi.ListConversationsOptions) (*slackapi.ConversationsListResponse, error) {
+			resp, err := mock.listConversationsFunc(c, opts)
+			if calls == 1 {
+				cancel() // Cancel after first successful call
+			}
+			return resp, err
+		},
+	}
+
+	r := NewChannelResolver()
+	err := r.LoadChannels(ctx, wrappedMock)
+
+	// Contract assertion: context cancellation propagated as error
+	if err == nil {
+		t.Fatal("expected error from context cancellation, got nil")
+	}
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestLoadChannels_TypesFilter(t *testing.T) {
+	var capturedTypes []string
+	mock := &mockSlackAPI{
+		listConversationsFunc: func(_ context.Context, opts *slackapi.ListConversationsOptions) (*slackapi.ConversationsListResponse, error) {
+			capturedTypes = opts.Types
+			return &slackapi.ConversationsListResponse{
+				OK: true,
+				Channels: []slackapi.Conversation{
+					{ID: "C001", Name: "general"},
+				},
+			}, nil
+		},
+	}
+
+	r := NewChannelResolver()
+	if err := r.LoadChannels(context.Background(), mock); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Contract assertion: types filter matches the hardcoded values
+	expectedTypes := []string{"public_channel", "private_channel"}
+	if len(capturedTypes) != len(expectedTypes) {
+		t.Fatalf("expected %d types, got %d", len(expectedTypes), len(capturedTypes))
+	}
+	for i, want := range expectedTypes {
+		if capturedTypes[i] != want {
+			t.Errorf("types[%d] = %q, want %q", i, capturedTypes[i], want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Boundary and overwrite-on-reload contract tests
+// ---------------------------------------------------------------------------
+
+func TestLoadUsers_EmptyResponse(t *testing.T) {
+	mock := &mockSlackAPI{
+		getUsersFunc: func(_ context.Context, _ string) (*slackapi.UsersListResponse, error) {
+			return &slackapi.UsersListResponse{OK: true, Members: []slackapi.User{}}, nil
+		},
+	}
+
+	r := NewUserResolver()
+	err := r.LoadUsers(context.Background(), mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: zero users cached
+	if r.Count() != 0 {
+		t.Errorf("Count() = %d, want 0", r.Count())
+	}
+}
+
+func TestLoadUsers_OverwriteOnReload(t *testing.T) {
+	callCount := 0
+	mock := &mockSlackAPI{
+		getUsersFunc: func(_ context.Context, _ string) (*slackapi.UsersListResponse, error) {
+			callCount++
+			if callCount <= 1 {
+				return &slackapi.UsersListResponse{
+					OK:      true,
+					Members: []slackapi.User{{ID: "U001", Name: "old-name", Profile: slackapi.UserProfile{DisplayName: "OldName"}}},
+				}, nil
+			}
+			return &slackapi.UsersListResponse{
+				OK:      true,
+				Members: []slackapi.User{{ID: "U001", Name: "new-name", Profile: slackapi.UserProfile{DisplayName: "NewName"}}},
+			}, nil
+		},
+	}
+
+	r := NewUserResolver()
+	_ = r.LoadUsers(context.Background(), mock)
+	_ = r.LoadUsers(context.Background(), mock)
+
+	// Contract assertion: second load overwrites first
+	if got := r.Resolve("U001"); got != "NewName" {
+		t.Errorf("Resolve(U001) = %q, want %q", got, "NewName")
+	}
+}
+
+func TestLoadUsersForConversations_NilChannelIDs(t *testing.T) {
+	apiCalled := false
+	mock := &mockSlackAPI{
+		getConversationMembers: func(_ context.Context, _ string, _ string) (*slackapi.MembersResponse, error) {
+			apiCalled = true
+			return nil, fmt.Errorf("should not be called")
+		},
+		getUserInfoFunc: func(_ context.Context, _ string) (*slackapi.User, error) {
+			apiCalled = true
+			return nil, fmt.Errorf("should not be called")
+		},
+	}
+
+	r := NewUserResolver()
+	err := r.LoadUsersForConversations(context.Background(), mock, nil)
+	// Contract assertion: nil channelIDs treated like empty — no error
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: no API calls made
+	if apiCalled {
+		t.Error("API should not have been called for nil channelIDs")
+	}
+	// Contract assertion: zero users cached
+	if r.Count() != 0 {
+		t.Errorf("Count() = %d, want 0", r.Count())
+	}
+}
+
+func TestLoadChannels_EmptyResponse(t *testing.T) {
+	mock := &mockSlackAPI{
+		listConversationsFunc: func(_ context.Context, _ *slackapi.ListConversationsOptions) (*slackapi.ConversationsListResponse, error) {
+			return &slackapi.ConversationsListResponse{OK: true, Channels: []slackapi.Conversation{}}, nil
+		},
+	}
+
+	r := NewChannelResolver()
+	err := r.LoadChannels(context.Background(), mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Contract assertion: unknown channel returns raw ID after empty load
+	if got := r.Resolve("C999"); got != "C999" {
+		t.Errorf("Resolve(C999) = %q, want C999", got)
+	}
+}
+
+func TestLoadChannels_OverwriteOnReload(t *testing.T) {
+	callCount := 0
+	mock := &mockSlackAPI{
+		listConversationsFunc: func(_ context.Context, _ *slackapi.ListConversationsOptions) (*slackapi.ConversationsListResponse, error) {
+			callCount++
+			if callCount <= 1 {
+				return &slackapi.ConversationsListResponse{
+					OK:       true,
+					Channels: []slackapi.Conversation{{ID: "C1", Name: "old"}},
+				}, nil
+			}
+			return &slackapi.ConversationsListResponse{
+				OK:       true,
+				Channels: []slackapi.Conversation{{ID: "C1", Name: "new"}},
+			}, nil
+		},
+	}
+
+	r := NewChannelResolver()
+	_ = r.LoadChannels(context.Background(), mock)
+	_ = r.LoadChannels(context.Background(), mock)
+
+	// Contract assertion: second load overwrites first
+	if got := r.Resolve("C1"); got != "new" {
+		t.Errorf("Resolve(C1) = %q, want 'new'", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: Confidence-79 gap-specific tests
+// ---------------------------------------------------------------------------
+
+func TestResolveWithFallback_ConcurrentAccess(t *testing.T) {
+	mock := &mockSlackAPI{
+		getUserInfoFunc: func(_ context.Context, userID string) (*slackapi.User, error) {
+			return &slackapi.User{
+				ID:   userID,
+				Name: "user-" + userID,
+				Profile: slackapi.UserProfile{
+					DisplayName: "Display " + userID,
+				},
+			}, nil
+		},
+	}
+
+	r := NewUserResolver()
+	var wg sync.WaitGroup
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			got := r.ResolveWithFallback(context.Background(), mock, id)
+			// Contract assertion: result is always non-empty
+			if got == "" {
+				t.Errorf("empty result for %s", id)
+			}
+		}(fmt.Sprintf("U%03d", i))
+	}
+	wg.Wait()
+
+	// Contract assertion: all 20 users were cached
+	if r.Count() != 20 {
+		t.Errorf("Count() = %d, want 20", r.Count())
 	}
 }

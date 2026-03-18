@@ -48,7 +48,14 @@ func (c *Client) CreateDocument(ctx context.Context, title string, folderID stri
 	}, nil
 }
 
-// FindDocument finds a document by name in a folder.
+// FindDocument searches for a Google Doc by exact title within the specified
+// folder. If folderID is empty, the search spans all non-trashed documents
+// accessible to the authenticated user.
+//
+// Returns a non-nil *DocInfo if a matching document is found (using the first
+// result if multiple matches exist). Returns (nil, nil) if no matching document
+// is found -- callers must check both return values. Returns (nil, error) if
+// the Drive API call fails. Errors are wrapped with context including the title.
 func (c *Client) FindDocument(ctx context.Context, title string, folderID string) (*DocInfo, error) {
 	query := fmt.Sprintf("name = '%s' and mimeType = '%s' and trashed = false", escapeName(title), MimeTypeDoc)
 	if folderID != "" {
@@ -91,7 +98,16 @@ func (c *Client) FindOrCreateDocument(ctx context.Context, title string, folderI
 	return c.CreateDocument(ctx, title, folderID)
 }
 
-// AppendText appends text to the end of a document.
+// AppendText appends the given text to the end of the Google Doc identified by
+// docID. It first reads the document to determine the current end index, then
+// inserts the text at that position.
+//
+// This method mutates the remote document by inserting text before the final
+// newline character. The insertion is retried automatically on Google API rate
+// limit errors via retryOnRateLimit.
+//
+// Returns nil on success. Returns a non-nil error if the document cannot be
+// read or if the text insertion fails. Errors are wrapped with context.
 func (c *Client) AppendText(ctx context.Context, docID string, text string) error {
 	// Get document to find end index
 	doc, err := c.Docs.Documents.Get(docID).Context(ctx).Do()
@@ -129,7 +145,18 @@ func (c *Client) AppendText(ctx context.Context, docID string, text string) erro
 	return nil
 }
 
-// InsertFormattedContent inserts formatted content at a specific index.
+// InsertFormattedContent inserts a slice of FormattedText entries at the given
+// index position in the Google Doc identified by docID. Text is inserted in
+// reverse order to maintain correct index offsets, with formatting (bold, italic,
+// monospace, hyperlinks) applied via a single batch update.
+//
+// If content is empty, it returns nil immediately without making any API calls.
+//
+// This method mutates the remote document. The batch update is retried
+// automatically on Google API rate limit errors via retryOnRateLimit.
+//
+// Returns nil on success. Returns a non-nil error if the batch update fails.
+// Errors are wrapped with context.
 func (c *Client) InsertFormattedContent(ctx context.Context, docID string, content []FormattedText, index int64) error {
 	if len(content) == 0 {
 		return nil
@@ -228,7 +255,13 @@ func getFieldMask(fc FormattedText) string {
 	return fields
 }
 
-// GetDocumentContent retrieves the text content of a document.
+// GetDocumentContent retrieves the full plain-text content of the Google Doc
+// identified by docID. It concatenates all TextRun elements from the document's
+// body paragraphs into a single string.
+//
+// Returns the concatenated text content on success. Returns an empty string if
+// the document body is nil or contains no text runs. Returns ("", error) if the
+// Docs API call fails. Errors are wrapped with context.
 func (c *Client) GetDocumentContent(ctx context.Context, docID string) (string, error) {
 	doc, err := c.Docs.Documents.Get(docID).Context(ctx).Do()
 	if err != nil {
@@ -266,8 +299,19 @@ func (c *Client) GetDocumentEndIndex(ctx context.Context, docID string) (int64, 
 	return 1, nil
 }
 
-// BatchAppendMessages appends multiple message blocks to a document efficiently.
-// Each message is formatted with sender name (bold), timestamp, and content.
+// BatchAppendMessages appends multiple message blocks to the Google Doc
+// identified by docID, using a single batch update for efficiency. Each message
+// is formatted with the sender name in bold, followed by the timestamp, then
+// the message content body, with link annotations and inline images applied.
+//
+// If messages is empty, it returns nil immediately without making any API calls.
+//
+// This method mutates the remote document by appending content at the current
+// end index. It first reads the document to determine the insertion point, then
+// builds all insert/style/image requests and submits them as one batch.
+//
+// Returns nil on success. Returns a non-nil error if reading the document end
+// index fails or if the batch update request fails.
 func (c *Client) BatchAppendMessages(ctx context.Context, docID string, messages []MessageBlock) error {
 	if len(messages) == 0 {
 		return nil
