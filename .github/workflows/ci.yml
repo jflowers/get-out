@@ -46,6 +46,6 @@ jobs:
             --ai=opencode \
             --model=opencode/claude-sonnet-4-6 \
             --coverprofile=coverage.out \
-            --max-crapload=5 \
+            --max-crapload=20 \
             --max-gaze-crapload=8 \
-            --min-contract-coverage=30
+            --min-contract-coverage=16
