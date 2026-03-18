@@ -5,7 +5,9 @@ description = "False positives from test fixture data in pkg/gdrive/auth_test.go
 # unit test fixtures — not real credentials.
 #   - "test-secret" is the fake client_secret
 #   - "test.apps.googleusercontent.com" is the fake client_id
+#   - "1//refresh-token" is the fake refresh_token
 regexes = [
   '''test-secret''',
   '''test\.apps\.googleusercontent\.com''',
+  '''1//refresh-token''',
 ]
