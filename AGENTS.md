@@ -36,7 +36,8 @@ get-out/
 │   ├── conversations.json    # Conversations to export
 │   ├── people.json           # User ID to name mappings
 │   └── credentials.json      # Google OAuth credentials
-└── specs/                    # Feature specifications
+├── specs/                    # Feature specifications
+└── ~/.get-out/chrome-data/   # Dedicated Chrome profile (created by setup-browser)
 ```
 
 ## Commands
@@ -60,7 +61,8 @@ go build -o get-out ./cmd/get-out
 # Run health checks
 ./get-out doctor
 
-# Verify Chrome + Slack setup (5-step wizard)
+# Launch Chrome and verify Slack setup (5-step wizard)
+# Auto-launches Chrome with dedicated profile at ~/.get-out/chrome-data/
 ./get-out setup-browser
 
 # List configured conversations

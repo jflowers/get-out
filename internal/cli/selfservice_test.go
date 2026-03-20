@@ -2,8 +2,10 @@ package cli
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -685,5 +687,126 @@ func TestChromeLaunchCmd(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Auto-launch Chrome helper tests
+// ---------------------------------------------------------------------------
+
+func TestChromeProfilePath(t *testing.T) {
+	t.Parallel()
+
+	path, err := chromeProfilePath()
+	if err != nil {
+		t.Fatalf("chromeProfilePath() returned error: %v", err)
+	}
+	if !strings.HasSuffix(path, filepath.Join(".get-out", "chrome-data")) {
+		t.Errorf("chromeProfilePath() = %q, want suffix %q", path, filepath.Join(".get-out", "chrome-data"))
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir() error: %v", err)
+	}
+	if !strings.HasPrefix(path, home) {
+		t.Errorf("chromeProfilePath() = %q, want prefix %q (home dir)", path, home)
+	}
+}
+
+func TestFindChromeBinary(t *testing.T) {
+	t.Parallel()
+
+	result := findChromeBinary()
+	switch runtime.GOOS {
+	case "darwin":
+		// On macOS with Chrome installed, should return the Chrome path.
+		// Skip assertion if Chrome is not installed (e.g., CI without Chrome).
+		if result == "" {
+			t.Skip("Chrome not installed on this macOS system")
+		}
+		if result != "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" {
+			t.Errorf("findChromeBinary() = %q, want macOS Chrome path", result)
+		}
+	case "linux":
+		// On Linux, result depends on what's installed; just verify it doesn't panic.
+		if result != "" {
+			t.Logf("findChromeBinary() found: %s", result)
+		} else {
+			t.Skip("No Chrome binary found on this Linux system")
+		}
+	default:
+		// On unsupported platforms, should return empty.
+		if result != "" {
+			t.Errorf("findChromeBinary() = %q on %s, want empty", result, runtime.GOOS)
+		}
+	}
+}
+
+func TestIsPortOpen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("listening port returns true", func(t *testing.T) {
+		t.Parallel()
+		// Start a listener on a random port.
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("net.Listen error: %v", err)
+		}
+		defer ln.Close()
+
+		port := ln.Addr().(*net.TCPAddr).Port
+		if !isPortOpen(port) {
+			t.Errorf("isPortOpen(%d) = false, want true (listener active)", port)
+		}
+	})
+
+	t.Run("unused port returns false", func(t *testing.T) {
+		t.Parallel()
+		// Get a port by briefly listening, then close it.
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("net.Listen error: %v", err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		ln.Close()
+
+		if isPortOpen(port) {
+			t.Errorf("isPortOpen(%d) = true, want false (no listener)", port)
+		}
+	})
+}
+
+func TestLaunchChrome_NoBinary(t *testing.T) {
+	t.Parallel()
+
+	// launchChrome calls findChromeBinary() internally.
+	// On a system without Chrome, it should return an error.
+	// To test this reliably without modifying findChromeBinary, we test
+	// with a path that won't have Chrome on any system.
+	// Note: This test verifies the error path when the binary is empty,
+	// but since findChromeBinary() checks the real system, we test the
+	// launchChrome function's contract: it should fail gracefully.
+
+	// We can't easily mock findChromeBinary since it's a package-level function.
+	// Instead, test that providing an invalid profile path still invokes the
+	// binary check first. On systems with Chrome, this will actually try to
+	// start Chrome, so we skip if Chrome is found.
+	if findChromeBinary() != "" {
+		t.Skip("Chrome is installed; cannot test missing-binary path")
+	}
+
+	cmd, err := launchChrome("/tmp/test-profile", 19999)
+	if err == nil {
+		t.Error("launchChrome() should return error when Chrome binary is not found")
+		if cmd != nil && cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	}
+	if cmd != nil {
+		t.Error("launchChrome() should return nil cmd on error")
+	}
+	if err != nil && !strings.Contains(err.Error(), "Chrome not found") {
+		t.Errorf("error message = %q, want it to contain %q", err.Error(), "Chrome not found")
 	}
 }

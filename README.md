@@ -226,15 +226,21 @@ By default, new users are merged with existing `people.json` entries. Use `--no-
 
 ### Browser Setup Wizard
 
-Start Chrome with remote debugging, then run the guided wizard:
+The setup wizard automatically launches Chrome with a dedicated profile and guides you through Slack authentication:
 
 ```bash
-# Start Chrome (macOS example)
-open -a "Google Chrome" --args --remote-debugging-port=9222
-
-# Verify Chrome + Slack setup (5-step wizard)
+# Launch Chrome, authenticate with Slack, and verify setup
 get-out setup-browser
 ```
+
+The wizard will:
+1. Create a dedicated Chrome profile at `~/.get-out/chrome-data/`
+2. Launch Chrome with remote debugging enabled (or detect an existing instance)
+3. Open `https://app.slack.com` for you to sign in
+4. Wait for you to authenticate, then verify credentials
+5. Validate against the Slack API
+
+On subsequent runs, Chrome reuses the dedicated profile so you're already signed in.
 
 ### Export Messages
 
@@ -444,11 +450,12 @@ The `Gaze quality report` step requires an `OPENCODE_API_KEY` secret set in the 
 Run `get-out doctor` to check all common setup issues at once. It prints actionable fixes for each failing check.
 
 ### "No Slack tab found in browser"
-Make sure Chrome is running with `--remote-debugging-port=9222` and has an active Slack tab open.
-Run `get-out setup-browser` for a guided diagnosis.
+Run `get-out setup-browser` — it will launch Chrome and guide you through Slack authentication.
+If Chrome is already running, make sure you have a Slack tab open at `https://app.slack.com`.
 
 ### "Failed to connect to browser"
-Check that Chrome is running and the port matches `--chrome-port`.
+Run `get-out setup-browser` to launch Chrome with the correct debugging flags.
+If you prefer manual control, check that Chrome is running with `--remote-debugging-port=9222` and the port matches `--chrome-port`.
 
 ### "No valid xoxc token found"
 Ensure you're logged into Slack in the browser. Try refreshing the Slack tab.

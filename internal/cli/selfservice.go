@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -651,20 +654,84 @@ func checkExportIndex(dir string, pass_, warn_, fail_ *int) {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-launch Chrome helpers
+// ---------------------------------------------------------------------------
+
+// chromeProfilePath returns the path to get-out's dedicated Chrome profile directory.
+func chromeProfilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".get-out", "chrome-data"), nil
+}
+
+// findChromeBinary locates the Chrome binary on the host system.
+// Returns an empty string if Chrome is not found.
+func findChromeBinary() string {
+	switch runtime.GOOS {
+	case "darwin":
+		const macChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+		if _, err := os.Stat(macChrome); err == nil {
+			return macChrome
+		}
+	case "linux":
+		for _, bin := range []string{"google-chrome", "google-chrome-stable", "chromium-browser"} {
+			if p, err := exec.LookPath(bin); err == nil {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// isPortOpen checks whether a TCP port is listening on localhost.
+func isPortOpen(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// launchChrome starts Chrome with remote debugging and a dedicated profile.
+// It returns the exec.Cmd (process running in background) or an error.
+func launchChrome(profilePath string, port int) (*exec.Cmd, error) {
+	chromeBin := findChromeBinary()
+	if chromeBin == "" {
+		return nil, fmt.Errorf("Chrome not found. Install Google Chrome and try again")
+	}
+
+	cmd := exec.Command(chromeBin,
+		fmt.Sprintf("--remote-debugging-port=%d", port),
+		"--user-data-dir="+profilePath,
+		"https://app.slack.com",
+	)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to launch Chrome: %w", err)
+	}
+	return cmd, nil
+}
+
+// ---------------------------------------------------------------------------
 // T028: setup-browser command
 // ---------------------------------------------------------------------------
 
 var setupBrowserCmd = &cobra.Command{
 	Use:          "setup-browser",
-	Short:        "Guided wizard to verify Chrome and Slack setup",
+	Short:        "Launch Chrome and verify Slack setup for export",
 	SilenceUsage: true,
-	Long: `Run a 5-step wizard to verify your Chrome + Slack session is ready for export.
+	Long: `Run a 5-step wizard to launch Chrome and verify your Slack session is ready for export.
 
 Steps:
-  1. Verify Chrome is running with remote debugging enabled
-  2. List browser tabs
-  3. Detect a logged-in Slack tab
-  4. Extract Slack credentials (token + cookie)
+  1. Set up a dedicated Chrome profile for get-out
+  2. Launch Chrome with remote debugging (or detect existing instance)
+  3. Interactive prompt for Slack authentication
+  4. Detect Slack tab and extract credentials (token + cookie)
   5. Validate credentials against the Slack API`,
 	RunE: runSetupBrowser,
 }
@@ -680,108 +747,166 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	stepFailed := false
-	slackTabFound := false
 
-	// Step 1: Chrome reachability
-	fmt.Print("Step 1  Chrome reachable on port ")
-	fmt.Printf("%d ... ", chromePort)
-	url := fmt.Sprintf("http://127.0.0.1:%d/json/version", chromePort)
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(url)
+	// Step 1: Chrome profile
+	fmt.Print("Step 1  Chrome profile ... ")
+	profilePath, err := chromeProfilePath()
 	if err != nil {
 		fmt.Println(failStyle.Render("FAIL"))
+		fmt.Println(dimStyle.Render("  " + err.Error()))
 		stepFailed = true
-		fmt.Println(dimStyle.Render(fmt.Sprintf("  Launch Chrome: %s", chromeLaunchCmd(runtime.GOOS, chromePort))))
-	} else {
-		resp.Body.Close()
-		fmt.Println(passStyle.Render("OK"))
 	}
 
-	// Step 2: List tabs
-	fmt.Print("Step 2  List browser tabs ... ")
-	var session *chrome.Session
+	firstRun := false
+	if !stepFailed {
+		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
+			firstRun = true
+			if err := os.MkdirAll(profilePath, 0700); err != nil {
+				fmt.Println(failStyle.Render("FAIL"))
+				fmt.Println(dimStyle.Render("  " + err.Error()))
+				stepFailed = true
+			} else {
+				fmt.Println(passStyle.Render("OK (created)"))
+				fmt.Println(dimStyle.Render("  " + profilePath))
+			}
+		} else if err != nil {
+			fmt.Println(failStyle.Render("FAIL"))
+			fmt.Println(dimStyle.Render("  " + err.Error()))
+			stepFailed = true
+		} else {
+			fmt.Println(passStyle.Render("OK"))
+			fmt.Println(dimStyle.Render("  " + profilePath))
+		}
+	}
+
+	// Step 2: Launch Chrome with remote debugging
+	fmt.Print("Step 2  Launch Chrome with remote debugging ... ")
+	if stepFailed {
+		fmt.Println(dimStyle.Render("Skipped"))
+	} else if isPortOpen(chromePort) {
+		fmt.Println(passStyle.Render(fmt.Sprintf("OK (already running on port %d)", chromePort)))
+	} else {
+		fmt.Println()
+		chromeCmd, err := launchChrome(profilePath, chromePort)
+		if err != nil {
+			fmt.Println(failStyle.Render("  FAIL"))
+			fmt.Println(dimStyle.Render("  " + err.Error()))
+			stepFailed = true
+		} else {
+			_ = chromeCmd // Process continues in background
+
+			// Poll for port readiness (20 × 500ms = 10s)
+			ready := false
+			for i := 0; i < 20; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if isPortOpen(chromePort) {
+					ready = true
+					break
+				}
+			}
+			if !ready {
+				fmt.Println(warnStyle.Render("  Chrome started but port not yet ready"))
+			} else {
+				pass(fmt.Sprintf("Chrome is running with remote debugging on port %d", chromePort))
+			}
+		}
+	}
+
+	// Step 3: Interactive Slack authentication prompt
+	fmt.Println()
+	fmt.Println("Step 3  Slack authentication")
+	if stepFailed {
+		fmt.Println(dimStyle.Render("  Skipped"))
+	} else if !isTerminal() {
+		warn("Non-interactive terminal — skipping authentication prompt")
+	} else {
+		if firstRun {
+			fmt.Println(boxStyle.Render(
+				"  A new Chrome window opened with a fresh profile.\n" +
+					"  This profile is dedicated to get-out.\n\n" +
+					"  1. Sign in to your Slack workspace at https://app.slack.com\n" +
+					"  2. Verify you can see your messages\n\n" +
+					"  Press Enter when done..."))
+		} else {
+			fmt.Println(boxStyle.Render(
+				"  Chrome opened with your get-out profile.\n" +
+					"  You should already be signed in.\n\n" +
+					"  Press Enter to verify..."))
+		}
+		fmt.Println()
+
+		reader := bufio.NewReader(os.Stdin)
+		if _, err := reader.ReadString('\n'); err != nil {
+			warn("stdin not available — skipping interactive pause")
+		}
+	}
+
+	// Step 4: Verify Slack tab & extract credentials
+	fmt.Print("Step 4  Verify Slack & extract credentials ... ")
+	slackTabFound := false
+	var creds interface{ GetToken() string }
 	if stepFailed {
 		fmt.Println(dimStyle.Render("Skipped"))
 	} else {
 		cfg := &chrome.Config{DebugPort: chromePort, Timeout: 5 * time.Second}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		session, err = chrome.Connect(ctx, cfg)
+
+		session, err := chrome.Connect(ctx, cfg)
 		if err != nil {
 			fmt.Println(failStyle.Render("FAIL"))
-			fmt.Println(dimStyle.Render("  " + err.Error()))
+			fmt.Println(dimStyle.Render("  Could not connect to Chrome: " + err.Error()))
 			stepFailed = true
 		} else {
+			defer session.Close()
+
 			ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel2()
 			targets, err := session.ListTargets(ctx2)
 			if err != nil {
 				fmt.Println(failStyle.Render("FAIL"))
+				fmt.Println(dimStyle.Render("  Could not list tabs: " + err.Error()))
 				stepFailed = true
 			} else {
-				fmt.Println(passStyle.Render(fmt.Sprintf("OK (%d tab(s))", len(targets))))
-			}
-		}
-	}
+				var found int
+				var slackURL string
+				for _, t := range targets {
+					if chrome.IsSlackURL(t.URL) {
+						found++
+						slackURL = t.URL
+					}
+				}
+				if found == 0 {
+					fmt.Println(warnStyle.Render("WARN (no Slack tab found)"))
+					fmt.Println(dimStyle.Render("  Open https://app.slack.com in Chrome and log in"))
+				} else {
+					slackTabFound = true
+					msg := fmt.Sprintf("found %d Slack tab(s)", found)
+					if verbose {
+						msg += "  " + truncateURL(slackURL)
+					}
+					fmt.Println()
+					pass(msg)
 
-	// Step 3: Find Slack tab
-	fmt.Print("Step 3  Find Slack tab ... ")
-	var slackURL string
-	if stepFailed || session == nil {
-		fmt.Println(dimStyle.Render("Skipped"))
-	} else {
-		ctx3, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel3()
-		targets, err := session.ListTargets(ctx3)
-		if err != nil {
-			fmt.Println(warnStyle.Render("WARN (could not list tabs)"))
-		} else {
-			var found int
-			for _, t := range targets {
-				if chrome.IsSlackURL(t.URL) {
-					found++
-					slackURL = t.URL
+					// Extract credentials
+					ctx3, cancel3 := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel3()
+					extracted, err := session.ExtractCredentials(ctx3)
+					if err != nil {
+						fail("Credential extraction failed: " + err.Error())
+						stepFailed = true
+					} else {
+						pass("Credentials extracted")
+						fmt.Println(dimStyle.Render(fmt.Sprintf("    Token:  %s", safePreview(extracted.Token))))
+						fmt.Println(dimStyle.Render(fmt.Sprintf("    Cookie: %s", safePreview(extracted.Cookie))))
+						creds = &extractedCreds{token: extracted.Token, cookie: extracted.Cookie}
+					}
 				}
 			}
-			if found == 0 {
-				fmt.Println(warnStyle.Render("WARN (no Slack tab found)"))
-				fmt.Println(dimStyle.Render("  Open https://app.slack.com in Chrome and log in"))
-				// step 3 is warn-only; stepFailed stays false but slackTabFound stays false
-				// so steps 4–5 are skipped (nothing to extract without a Slack tab)
-			} else {
-				slackTabFound = true
-				msg := fmt.Sprintf("OK (%d tab(s))", found)
-				if verbose {
-					msg += "  " + truncateURL(slackURL)
-				}
-				fmt.Println(passStyle.Render(msg))
-			}
 		}
 	}
 
-	// Step 4: Extract credentials
-	fmt.Print("Step 4  Extract Slack credentials ... ")
-	var creds interface{ GetToken() string }
-	if stepFailed || session == nil || !slackTabFound {
-		fmt.Println(dimStyle.Render("Skipped"))
-	} else {
-		ctx4, cancel4 := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel4()
-		extracted, err := session.ExtractCredentials(ctx4)
-		if err != nil {
-			fmt.Println(failStyle.Render("FAIL"))
-			fmt.Println(dimStyle.Render("  " + err.Error()))
-			stepFailed = true
-		} else {
-			fmt.Println(passStyle.Render("OK"))
-			fmt.Println(dimStyle.Render(fmt.Sprintf("  Token:  %s", safePreview(extracted.Token))))
-			fmt.Println(dimStyle.Render(fmt.Sprintf("  Cookie: %s", safePreview(extracted.Cookie))))
-			_ = creds
-			creds = &extractedCreds{token: extracted.Token, cookie: extracted.Cookie}
-		}
-	}
-
-	// Step 5: Validate credentials
+	// Step 5: Validate against Slack API
 	fmt.Print("Step 5  Validate against Slack API ... ")
 	if stepFailed || creds == nil {
 		fmt.Println(dimStyle.Render("Skipped"))
@@ -800,7 +925,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// If no Slack tab was found in step 3, steps 4–5 were skipped —
+	// If no Slack tab was found, steps 5 was skipped —
 	// mark as failed so the footer correctly reflects incomplete setup.
 	if !slackTabFound {
 		stepFailed = true
