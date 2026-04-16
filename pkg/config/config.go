@@ -3,8 +3,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/jflowers/get-out/pkg/models"
 )
@@ -25,6 +27,27 @@ var (
 	emailPattern          = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 )
 
+// ValidateSlackURL checks that a URL has an https scheme and belongs to
+// slack.com or a *.slack.com subdomain. It returns a descriptive error if
+// the URL is invalid.
+func ValidateSlackURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("slack workspace URL must use https scheme, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("slack workspace URL has no host")
+	}
+	if host != "slack.com" && !strings.HasSuffix(host, ".slack.com") {
+		return fmt.Errorf("slack workspace URL must be slack.com or *.slack.com, got %q", host)
+	}
+	return nil
+}
+
 // LoadSettings loads settings.json from the config directory.
 // Returns default settings if the file doesn't exist.
 func LoadSettings(path string) (*Settings, error) {
@@ -40,6 +63,17 @@ func LoadSettings(path string) (*Settings, error) {
 	settings := DefaultSettings()
 	if err := json.Unmarshal(data, settings); err != nil {
 		return nil, fmt.Errorf("failed to parse settings: %w", err)
+	}
+
+	// Apply default for empty SlackWorkspaceURL (json:"omitempty" means
+	// an explicit "" in the file clears the default set by DefaultSettings).
+	if settings.SlackWorkspaceURL == "" {
+		settings.SlackWorkspaceURL = "https://app.slack.com"
+	}
+
+	// Validate the Slack workspace URL
+	if err := ValidateSlackURL(settings.SlackWorkspaceURL); err != nil {
+		return nil, fmt.Errorf("invalid slackWorkspaceUrl in settings: %w", err)
 	}
 
 	return settings, nil

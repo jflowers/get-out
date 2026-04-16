@@ -126,6 +126,7 @@ Application-wide settings:
 ```json
 {
     "slackBotToken": "xoxb-your-bot-token-here",
+    "slackWorkspaceUrl": "https://app.slack.com",
     "googleCredentialsFile": "/path/to/your/credentials.json",
     "googleDriveFolderId": "1ABC123xyz_your_folder_id",
     "localExportOutputDir": "./slack_exports",
@@ -135,6 +136,7 @@ Application-wide settings:
 
 **Fields:**
 - `slackBotToken`: Slack bot token for API mode (future use)
+- `slackWorkspaceUrl`: Slack URL to open when Chrome launches (default: `https://app.slack.com`). Must be `https` and a `*.slack.com` domain. Use your workspace URL (e.g., `https://mycompany.slack.com`) to land directly in your workspace.
 - `googleCredentialsFile`: Custom path to Google OAuth credentials (overrides default)
 - `googleDriveFolderId`: Default Google Drive folder ID for exports (can be overridden with `--folder-id`)
 - `localExportOutputDir`: Directory for local exports (future use)

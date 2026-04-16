@@ -318,6 +318,11 @@ func init() {
 func runDoctor(cmd *cobra.Command, args []string) error {
 	var passCount, warnCount, failCount int
 
+	// Load settings for the configured Slack workspace URL.
+	doctorSettingsPath := filepath.Join(configDir, "settings.json")
+	doctorSettings, _ := config.LoadSettings(doctorSettingsPath)
+	slackURLForDoctor := doctorSettings.SlackWorkspaceURL
+
 	fmt.Println("─────────────────────────────────────────")
 	fmt.Println("  get-out doctor")
 	fmt.Println("─────────────────────────────────────────")
@@ -373,7 +378,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			slackSpinner.Update("Checking Slack tab...")
 			slackSpinner.Start()
 		}
-		checkSlackTab(chromePort, &passCount, &warnCount, &failCount)
+		checkSlackTab(chromePort, &passCount, &warnCount, &failCount, slackURLForDoctor)
 		if slackSpinner != nil {
 			slackSpinner.Stop()
 		}
@@ -588,7 +593,7 @@ func checkChrome(port int, pass_, warn_, fail_ *int) bool {
 }
 
 // checkSlackTab checks check 9.
-func checkSlackTab(port int, pass_, warn_, fail_ *int) {
+func checkSlackTab(port int, pass_, warn_, fail_ *int, slackURL string) {
 	cfg := &chrome.Config{DebugPort: port, Timeout: 5 * time.Second}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -608,12 +613,13 @@ func checkSlackTab(port int, pass_, warn_, fail_ *int) {
 		return
 	}
 
-	evalSlackTargets(targets, pass_, warn_)
+	evalSlackTargets(targets, pass_, warn_, slackURL)
 }
 
 // evalSlackTargets evaluates Chrome targets for Slack tabs.
+// The slackURL parameter is used in hint text when no Slack tab is found.
 // Extracted from checkSlackTab for testability without a real Chrome connection.
-func evalSlackTargets(targets []chrome.TargetInfo, pass_, warn_ *int) {
+func evalSlackTargets(targets []chrome.TargetInfo, pass_, warn_ *int, slackURL string) {
 	var slackCount int
 	for _, t := range targets {
 		if chrome.IsSlackURL(t.URL) {
@@ -623,7 +629,7 @@ func evalSlackTargets(targets []chrome.TargetInfo, pass_, warn_ *int) {
 
 	if slackCount == 0 {
 		warn("No Slack tab found in Chrome")
-		hint("Open https://app.slack.com in Chrome and log in")
+		hint("Open " + slackURL + " in Chrome and log in")
 		*warn_++
 		return
 	}
@@ -696,8 +702,9 @@ func isPortOpen(port int) bool {
 }
 
 // launchChrome starts Chrome with remote debugging and a dedicated profile.
+// The slackURL parameter specifies which Slack URL to open as the initial page.
 // It returns the exec.Cmd (process running in background) or an error.
-func launchChrome(profilePath string, port int) (*exec.Cmd, error) {
+func launchChrome(profilePath string, port int, slackURL string) (*exec.Cmd, error) {
 	chromeBin := findChromeBinary()
 	if chromeBin == "" {
 		return nil, fmt.Errorf("Chrome not found. Install Google Chrome and try again")
@@ -706,7 +713,7 @@ func launchChrome(profilePath string, port int) (*exec.Cmd, error) {
 	cmd := exec.Command(chromeBin,
 		fmt.Sprintf("--remote-debugging-port=%d", port),
 		"--user-data-dir="+profilePath,
-		"https://app.slack.com",
+		slackURL,
 	)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -745,6 +752,14 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 	fmt.Println("  get-out setup-browser")
 	fmt.Println("─────────────────────────────────────────")
 	fmt.Println()
+
+	// Load settings to get the configured Slack workspace URL.
+	settingsPath := filepath.Join(configDir, "settings.json")
+	settings, err := config.LoadSettings(settingsPath)
+	if err != nil {
+		return fmt.Errorf("failed to load settings: %w", err)
+	}
+	slackURL := settings.SlackWorkspaceURL
 
 	stepFailed := false
 
@@ -787,7 +802,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 		fmt.Println(passStyle.Render(fmt.Sprintf("OK (already running on port %d)", chromePort)))
 	} else {
 		fmt.Println()
-		chromeCmd, err := launchChrome(profilePath, chromePort)
+		chromeCmd, err := launchChrome(profilePath, chromePort, slackURL)
 		if err != nil {
 			fmt.Println(failStyle.Render("  FAIL"))
 			fmt.Println(dimStyle.Render("  " + err.Error()))
@@ -824,7 +839,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 			fmt.Println(boxStyle.Render(
 				"  A new Chrome window opened with a fresh profile.\n" +
 					"  This profile is dedicated to get-out.\n\n" +
-					"  1. Sign in to your Slack workspace at https://app.slack.com\n" +
+					"  1. Sign in to your Slack workspace at " + slackURL + "\n" +
 					"  2. Verify you can see your messages\n\n" +
 					"  Press Enter when done..."))
 		} else {
@@ -878,7 +893,7 @@ func runSetupBrowser(cmd *cobra.Command, args []string) error {
 				}
 				if found == 0 {
 					fmt.Println(warnStyle.Render("WARN (no Slack tab found)"))
-					fmt.Println(dimStyle.Render("  Open https://app.slack.com in Chrome and log in"))
+					fmt.Println(dimStyle.Render("  Open " + slackURL + " in Chrome and log in"))
 				} else {
 					slackTabFound = true
 					msg := fmt.Sprintf("found %d Slack tab(s)", found)
