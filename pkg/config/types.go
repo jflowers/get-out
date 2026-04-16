@@ -17,6 +17,9 @@ type Settings struct {
 	// Local export configuration (for future use)
 	LocalExportOutputDir string `json:"localExportOutputDir,omitempty"`
 
+	// Slack configuration
+	SlackWorkspaceURL string `json:"slackWorkspaceUrl,omitempty"`
+
 	// Logging
 	LogLevel string `json:"logLevel,omitempty"`
 }
@@ -24,7 +27,8 @@ type Settings struct {
 // DefaultSettings returns settings with default values.
 func DefaultSettings() *Settings {
 	return &Settings{
-		LogLevel: "INFO",
+		SlackWorkspaceURL: "https://app.slack.com",
+		LogLevel:          "INFO",
 	}
 }
 

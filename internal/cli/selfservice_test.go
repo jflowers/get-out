@@ -557,7 +557,7 @@ func TestCheckSlackTab_ConnectionError(t *testing.T) {
 	// should increment warnCount and return without panicking.
 	var p, w, f int
 	// Use a high port that is almost certainly not listening
-	checkSlackTab(19999, &p, &w, &f)
+	checkSlackTab(19999, &p, &w, &f, "https://app.slack.com")
 	if w != 1 {
 		t.Errorf("got pass=%d warn=%d fail=%d, want warn=1", p, w, f)
 	}
@@ -570,7 +570,7 @@ func TestCheckSlackTab_DifferentInvalidPorts(t *testing.T) {
 	// Multiple invalid ports to ensure checkSlackTab handles them consistently.
 	for _, port := range []int{19998, 19997, 19996} {
 		var p, w, f int
-		checkSlackTab(port, &p, &w, &f)
+		checkSlackTab(port, &p, &w, &f, "https://app.slack.com")
 		if w != 1 {
 			t.Errorf("port %d: got warn=%d, want 1", port, w)
 		}
@@ -586,7 +586,7 @@ func TestCheckSlackTab_DifferentInvalidPorts(t *testing.T) {
 
 func TestEvalSlackTargets_NoTargets(t *testing.T) {
 	var p, w int
-	evalSlackTargets(nil, &p, &w)
+	evalSlackTargets(nil, &p, &w, "https://app.slack.com")
 	if w != 1 || p != 0 {
 		t.Errorf("got pass=%d warn=%d, want pass=0 warn=1", p, w)
 	}
@@ -598,7 +598,7 @@ func TestEvalSlackTargets_NoSlackTabs(t *testing.T) {
 		{URL: "https://github.com", Type: "page", Title: "GitHub"},
 	}
 	var p, w int
-	evalSlackTargets(targets, &p, &w)
+	evalSlackTargets(targets, &p, &w, "https://app.slack.com")
 	if w != 1 || p != 0 {
 		t.Errorf("got pass=%d warn=%d, want pass=0 warn=1", p, w)
 	}
@@ -610,7 +610,7 @@ func TestEvalSlackTargets_OneSlackTab(t *testing.T) {
 		{URL: "https://app.slack.com/client/T123/C456", Type: "page", Title: "Slack"},
 	}
 	var p, w int
-	evalSlackTargets(targets, &p, &w)
+	evalSlackTargets(targets, &p, &w, "https://app.slack.com")
 	if p != 1 || w != 0 {
 		t.Errorf("got pass=%d warn=%d, want pass=1 warn=0", p, w)
 	}
@@ -622,7 +622,7 @@ func TestEvalSlackTargets_MultipleSlackTabs(t *testing.T) {
 		{URL: "https://myworkspace.slack.com/messages", Type: "page", Title: "Slack 2"},
 	}
 	var p, w int
-	evalSlackTargets(targets, &p, &w)
+	evalSlackTargets(targets, &p, &w, "https://app.slack.com")
 	if p != 1 || w != 0 {
 		t.Errorf("got pass=%d warn=%d, want pass=1 warn=0", p, w)
 	}
@@ -796,7 +796,7 @@ func TestLaunchChrome_NoBinary(t *testing.T) {
 		t.Skip("Chrome is installed; cannot test missing-binary path")
 	}
 
-	cmd, err := launchChrome("/tmp/test-profile", 19999)
+	cmd, err := launchChrome("/tmp/test-profile", 19999, "https://app.slack.com")
 	if err == nil {
 		t.Error("launchChrome() should return error when Chrome binary is not found")
 		if cmd != nil && cmd.Process != nil {

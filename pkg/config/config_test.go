@@ -412,6 +412,9 @@ func TestDefaultSettings_ContractAssertions(t *testing.T) {
 	if s.LocalExportOutputDir != "" {
 		t.Errorf("LocalExportOutputDir = %q, want empty", s.LocalExportOutputDir)
 	}
+	if s.SlackWorkspaceURL != "https://app.slack.com" {
+		t.Errorf("SlackWorkspaceURL = %q, want https://app.slack.com", s.SlackWorkspaceURL)
+	}
 	if s.LogLevel != "INFO" {
 		t.Errorf("LogLevel = %q, want INFO", s.LogLevel)
 	}
@@ -447,6 +450,112 @@ func TestLoadConversations_FileNotFound(t *testing.T) {
 	if cfg != nil {
 		t.Error("expected nil config on error")
 	}
+}
+
+func TestValidateSlackURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{name: "valid app.slack.com", url: "https://app.slack.com", wantErr: false},
+		{name: "valid workspace subdomain", url: "https://mycompany.slack.com", wantErr: false},
+		{name: "valid slack.com", url: "https://slack.com", wantErr: false},
+		{name: "valid deep subdomain", url: "https://team.enterprise.slack.com", wantErr: false},
+		{name: "valid with path", url: "https://mycompany.slack.com/signin", wantErr: false},
+		{name: "http scheme rejected", url: "http://mycompany.slack.com", wantErr: true},
+		{name: "non-slack host rejected", url: "https://example.com", wantErr: true},
+		{name: "spoofed host rejected", url: "https://slack.com.evil.com", wantErr: true},
+		{name: "not-slack suffix rejected", url: "https://not-slack.com", wantErr: true},
+		{name: "empty string rejected", url: "", wantErr: true},
+		{name: "bare domain no scheme rejected", url: "slack.com", wantErr: true},
+		{name: "ftp scheme rejected", url: "ftp://slack.com", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSlackURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSlackURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadSettings_SlackWorkspaceURL(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test: explicit slackWorkspaceUrl is loaded
+	t.Run("explicit URL loaded", func(t *testing.T) {
+		path := filepath.Join(dir, "settings_explicit.json")
+		data := `{"slackWorkspaceUrl": "https://mycompany.slack.com"}`
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := LoadSettings(path)
+		if err != nil {
+			t.Fatalf("LoadSettings() error: %v", err)
+		}
+		if s.SlackWorkspaceURL != "https://mycompany.slack.com" {
+			t.Errorf("SlackWorkspaceURL = %q, want https://mycompany.slack.com", s.SlackWorkspaceURL)
+		}
+	})
+
+	// Test: missing field gets default
+	t.Run("missing field gets default", func(t *testing.T) {
+		path := filepath.Join(dir, "settings_nofield.json")
+		data := `{"logLevel": "DEBUG"}`
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := LoadSettings(path)
+		if err != nil {
+			t.Fatalf("LoadSettings() error: %v", err)
+		}
+		if s.SlackWorkspaceURL != "https://app.slack.com" {
+			t.Errorf("SlackWorkspaceURL = %q, want https://app.slack.com", s.SlackWorkspaceURL)
+		}
+	})
+
+	// Test: empty string gets default
+	t.Run("empty string gets default", func(t *testing.T) {
+		path := filepath.Join(dir, "settings_empty.json")
+		data := `{"slackWorkspaceUrl": ""}`
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := LoadSettings(path)
+		if err != nil {
+			t.Fatalf("LoadSettings() error: %v", err)
+		}
+		if s.SlackWorkspaceURL != "https://app.slack.com" {
+			t.Errorf("SlackWorkspaceURL = %q, want https://app.slack.com", s.SlackWorkspaceURL)
+		}
+	})
+
+	// Test: invalid URL returns error
+	t.Run("invalid URL returns error", func(t *testing.T) {
+		path := filepath.Join(dir, "settings_invalid.json")
+		data := `{"slackWorkspaceUrl": "https://example.com"}`
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := LoadSettings(path)
+		if err == nil {
+			t.Error("LoadSettings() expected error for invalid Slack URL, got nil")
+		}
+	})
+
+	// Test: missing file still gets default
+	t.Run("missing file gets default", func(t *testing.T) {
+		s, err := LoadSettings(filepath.Join(dir, "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("LoadSettings(missing) error: %v", err)
+		}
+		if s.SlackWorkspaceURL != "https://app.slack.com" {
+			t.Errorf("SlackWorkspaceURL = %q, want https://app.slack.com", s.SlackWorkspaceURL)
+		}
+	})
 }
 
 func TestDefaultSettings_DistinctInstances(t *testing.T) {
