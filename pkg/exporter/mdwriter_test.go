@@ -565,6 +565,12 @@ func TestSanitizeDirectoryName(t *testing.T) {
 			convName: "Alice & Bob's Chat!",
 			want:     "group-alice-bobs-chat",
 		},
+		{
+			name:     "unknown type passes through as prefix",
+			convType: "custom_type",
+			convName: "test",
+			want:     "custom_type-test",
+		},
 	}
 
 	for _, tt := range tests {

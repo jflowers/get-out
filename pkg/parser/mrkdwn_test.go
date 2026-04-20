@@ -136,6 +136,16 @@ func TestConvertMrkdwnToMarkdown(t *testing.T) {
 			input: "<!everyone>",
 			want:  "@everyone",
 		},
+		{
+			name:  "unknown special mention without display",
+			input: "<!subteam>",
+			want:  "@subteam",
+		},
+		{
+			name:  "unknown special mention with display",
+			input: "<!subteam|@engineering>",
+			want:  "@engineering",
+		},
 
 		// --- HTML entity decoding ---
 		{
