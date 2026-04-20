@@ -43,6 +43,7 @@ type ConversationConfig struct {
 	Name         string                  `json:"name"`
 	Type         models.ConversationType `json:"type"`
 	Export       bool                    `json:"export"`
+	LocalExport  bool                    `json:"localExport,omitempty"`
 	Share        bool                    `json:"share"`
 	ShareMembers []string                `json:"shareMembers,omitempty"`
 }

@@ -27,6 +27,8 @@ get-out/
 │   ├── slackapi/             # Slack API client (browser + bot modes)
 │   ├── gdrive/               # Google Drive/Docs API client
 │   ├── exporter/             # Export orchestration and indexing
+│   │   ├── mdwriter.go       # Markdown writer for local export
+│   │   └── mdfile.go         # Filesystem operations for markdown export
 │   ├── parser/               # Slack mrkdwn conversion
 │   ├── config/               # Configuration loading
 │   ├── secrets/              # SecretStore interface + KeychainStore/FileStore backends
@@ -79,6 +81,9 @@ go build -o get-out ./cmd/get-out
 
 # Export to specific folder ID
 ./get-out export --folder-id <google-drive-folder-id> --config ./config
+
+# Export with local markdown copies for Dewey indexing
+./get-out export --local-export-dir ~/.get-out/export --config ./config
 ```
 
 ### Test

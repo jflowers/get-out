@@ -30,10 +30,14 @@ type Exporter struct {
 	// Helpers
 	folderStructure *FolderStructure
 	docWriter       *DocWriter
+	mdWriter        *MarkdownWriter
 	userResolver    *parser.UserResolver
 	channelResolver *parser.ChannelResolver
 	personResolver  *parser.PersonResolver
 	index           *ExportIndex
+
+	// Local markdown export
+	localExportDir string
 
 	// Progress callback
 	onProgress func(msg string)
@@ -63,6 +67,9 @@ type ExporterConfig struct {
 	DateTo     string // Slack timestamp: only export messages before this
 	SyncMode   bool   // Only export messages since last successful export
 	ResumeMode bool   // Resume incomplete exports, skip completed ones
+
+	// Local markdown export directory (expanded absolute path)
+	LocalExportDir string
 }
 
 // Progress is a helper to report progress.
@@ -86,6 +93,7 @@ func NewExporter(cfg *ExporterConfig) *Exporter {
 		dateTo:                cfg.DateTo,
 		syncMode:              cfg.SyncMode,
 		resumeMode:            cfg.ResumeMode,
+		localExportDir:        cfg.LocalExportDir,
 		userResolver:          parser.NewUserResolver(),
 		channelResolver:       parser.NewChannelResolver(),
 	}
@@ -144,6 +152,11 @@ func (e *Exporter) InitializeWithStore(ctx context.Context, chromePort int, stor
 	e.loadPersonResolver()
 
 	e.docWriter = NewDocWriter(e.gdriveClient, e.slackClient, e.userResolver, e.channelResolver, e.personResolver, e.index.LookupDocURL, e.index.LookupThreadURL)
+
+	// Initialize MarkdownWriter for local markdown export when configured
+	if e.localExportDir != "" {
+		e.mdWriter = NewMarkdownWriter(e.userResolver, e.channelResolver, e.personResolver)
+	}
 
 	return nil
 }
@@ -323,6 +336,23 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 		convExport.mu.Unlock()
 		if err := e.index.Save(); err != nil {
 			e.Progress("Warning: failed to save checkpoint: %v", err)
+		}
+
+		// Write local markdown if configured and conversation opted in
+		if e.mdWriter != nil && e.localExportDir != "" && conv.LocalExport {
+			mdContent, mdErr := e.mdWriter.RenderDailyDoc(conv.Name, string(conv.Type), date, msgs)
+			if mdErr != nil {
+				e.Progress("Warning: failed to render markdown for %s: %v", date, mdErr)
+				result.MarkdownErrors++
+			} else {
+				typeName := SanitizeDirectoryName(string(conv.Type), conv.Name)
+				if writeErr := WriteMarkdownFile(e.localExportDir, typeName, date, mdContent); writeErr != nil {
+					e.Progress("Warning: failed to write markdown for %s: %v", date, writeErr)
+					result.MarkdownErrors++
+				} else {
+					result.MarkdownFilesWritten++
+				}
+			}
 		}
 	}
 
@@ -753,6 +783,10 @@ type ExportResult struct {
 	Duration        time.Duration
 	Error           error
 	Skipped         bool // True if skipped during --resume (already complete)
+
+	// Local markdown export stats
+	MarkdownFilesWritten int
+	MarkdownErrors       int
 }
 
 // String returns a summary of the export result.
@@ -764,8 +798,15 @@ func (r *ExportResult) String() string {
 	if r.Error != nil {
 		status = fmt.Sprintf("ERROR: %v", r.Error)
 	}
-	return fmt.Sprintf("%s: %d messages, %d docs, %d threads (%v) - %s",
-		r.Name, r.MessageCount, r.DocsCreated, r.ThreadsExported, r.Duration, status)
+	summary := fmt.Sprintf("%s: %d messages, %d docs, %d threads",
+		r.Name, r.MessageCount, r.DocsCreated, r.ThreadsExported)
+	if r.MarkdownFilesWritten > 0 || r.MarkdownErrors > 0 {
+		summary += fmt.Sprintf(", %d md files", r.MarkdownFilesWritten)
+		if r.MarkdownErrors > 0 {
+			summary += fmt.Sprintf(" (%d md errors)", r.MarkdownErrors)
+		}
+	}
+	return fmt.Sprintf("%s (%v) - %s", summary, r.Duration, status)
 }
 
 // orDefault returns s if non-empty, otherwise the fallback.

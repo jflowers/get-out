@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -556,6 +557,42 @@ func TestLoadSettings_SlackWorkspaceURL(t *testing.T) {
 			t.Errorf("SlackWorkspaceURL = %q, want https://app.slack.com", s.SlackWorkspaceURL)
 		}
 	})
+}
+
+func TestConversationConfig_LocalExport(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		wantVal  bool
+	}{
+		{
+			name:    "omitted defaults to false",
+			json:    `{"id":"C1","name":"ch","type":"channel","export":true}`,
+			wantVal: false,
+		},
+		{
+			name:    "explicit true",
+			json:    `{"id":"C1","name":"ch","type":"channel","export":true,"localExport":true}`,
+			wantVal: true,
+		},
+		{
+			name:    "explicit false",
+			json:    `{"id":"C1","name":"ch","type":"channel","export":true,"localExport":false}`,
+			wantVal: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg ConversationConfig
+			if err := json.Unmarshal([]byte(tt.json), &cfg); err != nil {
+				t.Fatalf("json.Unmarshal() error: %v", err)
+			}
+			if cfg.LocalExport != tt.wantVal {
+				t.Errorf("LocalExport = %v, want %v", cfg.LocalExport, tt.wantVal)
+			}
+		})
+	}
 }
 
 func TestDefaultSettings_DistinctInstances(t *testing.T) {

@@ -11,6 +11,7 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 - **@Mention linking**: Converts `@mentions` to clickable Google email links in exported docs
 - **Slack link replacement**: Replaces Slack message URLs with links to the corresponding Google Docs
 - **Cross-conversation link resolution**: Second-pass scan resolves forward references across conversations
+- **Local markdown export**: Writes searchable markdown copies alongside Google Docs for AI agent indexing (Dewey)
 - **Batch export**: `--all-dms` and `--all-groups` flags for bulk export by conversation type
 - **Parallel export**: `--parallel N` exports up to N conversations concurrently
 - **Checkpoint/Resume**: Granular checkpointing after each doc — resume crashed exports with `--resume`
@@ -96,7 +97,8 @@ Define which conversations to export:
             "type": "channel",
             "mode": "api",
             "export": true,
-            "share": true
+            "share": true,
+            "localExport": true
         },
         {
             "id": "D06DDJ2UH2M",
@@ -118,6 +120,7 @@ Define which conversations to export:
 - `export`: Set to `true` to include in export
 - `share`: Whether to share the exported folder (future feature)
 - `shareMembers`: Optional list of emails to share with
+- `localExport`: Set to `true` to write local markdown copies for this conversation (requires `localExportOutputDir` or `--local-export-dir`)
 
 ### 4. settings.json (Optional)
 
@@ -129,7 +132,7 @@ Application-wide settings:
     "slackWorkspaceUrl": "https://app.slack.com",
     "googleCredentialsFile": "/path/to/your/credentials.json",
     "googleDriveFolderId": "1ABC123xyz_your_folder_id",
-    "localExportOutputDir": "./slack_exports",
+    "localExportOutputDir": "~/.get-out/export",
     "logLevel": "INFO"
 }
 ```
@@ -139,7 +142,7 @@ Application-wide settings:
 - `slackWorkspaceUrl`: Slack URL to open when Chrome launches (default: `https://app.slack.com`). Must be `https` and a `*.slack.com` domain. Use your workspace URL (e.g., `https://mycompany.slack.com`) to land directly in your workspace.
 - `googleCredentialsFile`: Custom path to Google OAuth credentials (overrides default)
 - `googleDriveFolderId`: Default Google Drive folder ID for exports (can be overridden with `--folder-id`)
-- `localExportOutputDir`: Directory for local exports (future use)
+- `localExportOutputDir`: Directory for local markdown export (e.g., `~/.get-out/export`). Enables writing searchable markdown copies alongside Google Docs. Per-conversation opt-in via `localExport: true` in `conversations.json`
 - `logLevel`: Logging verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`)
 
 All fields are optional. CLI flags override settings values.
@@ -286,6 +289,9 @@ On subsequent runs, Chrome reuses the dedicated profile so you're already signed
 
 # Export to an existing Google Drive folder by ID
 ./get-out export --folder-id 1ABC123xyz --config ./config
+
+# Export with local markdown copies for Dewey indexing
+./get-out export --local-export-dir ~/.get-out/export --config ./config
 ```
 
 ### Check Export Status
@@ -319,7 +325,8 @@ Shows conversation export progress: status (complete/in-progress), message count
 --all-dms              Export all DM conversations
 --all-groups           Export all group (MPIM) conversations
 --parallel int         Number of conversations to export concurrently, max 5 (default 1)
---user-mapping string  Path to people.json for @mention linking
+--user-mapping string       Path to people.json for @mention linking
+--local-export-dir string   Directory for local markdown export (overrides localExportOutputDir in settings.json)
 ```
 
 **Note:** The `--folder-id` can be found in a Google Drive folder URL: `https://drive.google.com/drive/folders/{folder-id}`
@@ -343,6 +350,57 @@ Slack Exports/
     └── 2024-01-16.gdoc
 ```
 
+### Local Markdown Export
+
+When `--local-export-dir` is set (or `localExportOutputDir` in `settings.json`), conversations with `localExport: true` also get written as local markdown files. This enables AI agents like [Dewey](https://github.com/unbound-force/dewey) to search and index Slack conversation history.
+
+**Two-level opt-in:**
+1. Set the export directory globally via `localExportOutputDir` in `settings.json` or `--local-export-dir` on the command line
+2. Set `localExport: true` on each conversation you want to include
+
+**File structure:**
+
+```
+~/.get-out/export/
+  channel-design-decisions/
+    2026-04-11.md
+  dm-john-smith/
+    2026-04-11.md
+```
+
+**Example markdown output:**
+
+```markdown
+---
+source: slack
+channel: design-decisions
+channel_id: C04KFBJTDJR
+type: channel
+date: "2026-04-11"
+export_ts: "2026-04-11T14:30:00Z"
+---
+
+## 2026-04-11
+
+**Alice (9:15 AM)**
+Let's use event sourcing for the audit log.
+
+**Bob (9:22 AM)**
+Agreed. I'll draft the schema today.
+```
+
+**Dewey integration:**
+
+Point a Dewey disk source at the export directory to make conversations searchable:
+
+```yaml
+# In any repo's .uf/dewey/sources.yaml
+- id: disk-slack-export
+  type: disk
+  config:
+    path: "~/.get-out/export"
+```
+
 ## Project Structure
 
 ```
@@ -362,6 +420,8 @@ get-out/
 │   ├── slackapi/         # Slack API client (browser + bot modes)
 │   ├── gdrive/           # Google Drive/Docs API client
 │   ├── exporter/         # Export orchestration and indexing
+│   │   ├── mdwriter.go   # Markdown writer for local export
+│   │   └── mdfile.go     # Filesystem operations for markdown export
 │   ├── parser/           # Slack mrkdwn, user/person resolution
 │   ├── config/           # Configuration loading
 │   └── models/           # Shared data models
