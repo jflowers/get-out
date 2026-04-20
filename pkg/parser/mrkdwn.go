@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -190,6 +191,124 @@ func ConvertMrkdwnWithLinks(text string, userResolver *UserResolver, channelReso
 	result = decodeHTMLEntities(result)
 
 	return result, links
+}
+
+// ConvertMrkdwnToMarkdown converts Slack mrkdwn to standard Markdown, preserving
+// formatting rather than stripping it. Bold (*text*) becomes **text**, italic
+// (_text_) becomes *text*, strikethrough (~text~) becomes ~~text~~, and code
+// spans/blocks are kept as-is. Slack-specific markup (mentions, URLs, special
+// mentions) is resolved the same way as ConvertMrkdwnWithLinks.
+func ConvertMrkdwnToMarkdown(text string, userResolver *UserResolver, channelResolver *ChannelResolver, personResolver *PersonResolver) string {
+	if text == "" {
+		return ""
+	}
+
+	result := text
+
+	// --- Phase 1: Extract and protect code blocks and inline code ---
+	// Replace with placeholders so formatting inside code is not altered.
+	var codeBlocks []string
+	var inlineCodes []string
+
+	// Code blocks first (``` ... ```) — must come before inline code (` ... `)
+	result = codeBlockPattern.ReplaceAllStringFunc(result, func(match string) string {
+		inner := codeBlockPattern.FindStringSubmatch(match)[1]
+		placeholder := fmt.Sprintf("\x00CODEBLOCK%d\x00", len(codeBlocks))
+		codeBlocks = append(codeBlocks, inner)
+		return placeholder
+	})
+
+	// Inline code (` ... `)
+	result = inlineCodePattern.ReplaceAllStringFunc(result, func(match string) string {
+		inner := inlineCodePattern.FindStringSubmatch(match)[1]
+		placeholder := fmt.Sprintf("\x00INLINECODE%d\x00", len(inlineCodes))
+		inlineCodes = append(inlineCodes, inner)
+		return placeholder
+	})
+
+	// --- Phase 2: Process Slack-specific markup (mentions, URLs, special mentions) ---
+
+	// Replace user mentions
+	result = userMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := userMentionPattern.FindStringSubmatch(match)
+		mention, _ := resolveUserMention(matches, userResolver, personResolver)
+		return mention
+	})
+
+	// Replace channel mentions
+	result = channelMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := channelMentionPattern.FindStringSubmatch(match)
+		if len(matches) >= 3 && matches[2] != "" {
+			return "#" + matches[2]
+		}
+		channelID := matches[1]
+		if channelResolver != nil {
+			return "#" + channelResolver.Resolve(channelID)
+		}
+		return "#" + channelID
+	})
+
+	// Replace URLs with text → markdown link syntax
+	result = urlWithTextPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := urlWithTextPattern.FindStringSubmatch(match)
+		url := matches[1]
+		displayText := matches[2]
+		return "[" + displayText + "](" + url + ")"
+	})
+
+	// Replace URLs without text → autolink syntax
+	result = urlOnlyPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := urlOnlyPattern.FindStringSubmatch(match)
+		return "<" + matches[1] + ">"
+	})
+
+	// Replace special mentions
+	result = specialMentionPattern.ReplaceAllStringFunc(result, func(match string) string {
+		matches := specialMentionPattern.FindStringSubmatch(match)
+		switch matches[1] {
+		case "here":
+			return "@here"
+		case "channel":
+			return "@channel"
+		case "everyone":
+			return "@everyone"
+		default:
+			if len(matches) >= 3 && matches[2] != "" {
+				return matches[2]
+			}
+			return "@" + matches[1]
+		}
+	})
+
+	// --- Phase 3: Convert formatting markers ---
+
+	// Bold: *text* → **text**
+	result = boldPattern.ReplaceAllString(result, "**$1**")
+
+	// Italic: _text_ → *text*
+	result = italicPattern.ReplaceAllString(result, "*$1*")
+
+	// Strikethrough: ~text~ → ~~text~~
+	result = strikePattern.ReplaceAllString(result, "~~$1~~")
+
+	// --- Phase 4: Decode HTML entities ---
+	result = decodeHTMLEntities(result)
+
+	// --- Phase 5: Restore code blocks and inline code from placeholders ---
+
+	// Restore code blocks as fenced code blocks
+	for i, block := range codeBlocks {
+		placeholder := fmt.Sprintf("\x00CODEBLOCK%d\x00", i)
+		result = strings.Replace(result, placeholder, "\n```\n"+block+"\n```\n", 1)
+	}
+
+	// Restore inline code
+	for i, code := range inlineCodes {
+		placeholder := fmt.Sprintf("\x00INLINECODE%d\x00", i)
+		result = strings.Replace(result, placeholder, "`"+code+"`", 1)
+	}
+
+	return result
 }
 
 // ExtractSlackLinks finds Slack message/thread links in text.

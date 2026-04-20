@@ -20,17 +20,18 @@ import (
 )
 
 var (
-	exportFolder      string
-	exportFolderID    string
-	exportDryRun      bool
-	exportResume      bool
-	exportFrom        string
-	exportTo          string
-	exportSync        bool
-	exportUserMapping string
-	exportAllDMs      bool
-	exportAllGroups   bool
-	exportParallel    int
+	exportFolder        string
+	exportFolderID      string
+	exportDryRun        bool
+	exportResume        bool
+	exportFrom          string
+	exportTo            string
+	exportSync          bool
+	exportUserMapping   string
+	exportAllDMs        bool
+	exportAllGroups     bool
+	exportParallel      int
+	exportLocalExportDir string
 )
 
 var exportCmd = &cobra.Command{
@@ -92,6 +93,7 @@ func init() {
 	exportCmd.Flags().BoolVar(&exportAllDMs, "all-dms", false, "Export all DM conversations")
 	exportCmd.Flags().BoolVar(&exportAllGroups, "all-groups", false, "Export all group (MPIM) conversations")
 	exportCmd.Flags().IntVar(&exportParallel, "parallel", 1, "Number of conversations to export concurrently (max 5)")
+	exportCmd.Flags().StringVar(&exportLocalExportDir, "local-export-dir", "", "Directory for local markdown export (overrides settings)")
 	rootCmd.AddCommand(exportCmd)
 }
 
@@ -109,6 +111,16 @@ func runExport(cmd *cobra.Command, args []string) error {
 
 	// Resolve folder ID from flags and settings
 	exportFolderID = resolveExportFolderID(exportFolderID, settings)
+
+	// Resolve local export directory from flag and settings
+	localExportDir := resolveLocalExportDir(exportLocalExportDir, settings)
+	if localExportDir != "" {
+		var pathErr error
+		localExportDir, pathErr = exporter.ExpandAndValidatePath(localExportDir)
+		if pathErr != nil {
+			return fmt.Errorf("invalid local export directory: %w", pathErr)
+		}
+	}
 
 	// Load conversations config
 	configPath := filepath.Join(configDir, "conversations.json")
@@ -156,11 +168,17 @@ func runExport(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Drive folder: %s\n", exportFolder)
 	}
 	fmt.Printf("Chrome port: %d\n", chromePort)
+	if localExportDir != "" {
+		fmt.Printf("Local export: %s\n", localExportDir)
+	}
 	fmt.Println()
 
 	// Dry run mode - just show what would be exported
 	if exportDryRun {
 		formatExportDryRun(os.Stdout, toExport)
+		if localExportDir != "" {
+			formatLocalExportDryRun(os.Stdout, toExport, localExportDir)
+		}
 		return nil
 	}
 
@@ -213,6 +231,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 		DateTo:                dateTo,
 		SyncMode:              exportSync,
 		ResumeMode:            exportResume,
+		LocalExportDir:        localExportDir,
 		OnProgress: func(msg string) {
 			if verbose || debugMode {
 				fmt.Printf("  %s\n", msg)
@@ -431,6 +450,34 @@ func resolveExportFolderID(flagValue string, settings *config.Settings) string {
 		return settings.FolderID
 	}
 	return settings.GoogleDriveFolderID
+}
+
+// resolveLocalExportDir determines the local export directory from the CLI
+// flag and settings. The flag takes priority over settings.LocalExportOutputDir.
+func resolveLocalExportDir(flagValue string, settings *config.Settings) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return settings.LocalExportOutputDir
+}
+
+// formatLocalExportDryRun writes the local markdown export section of the
+// dry-run output, showing which conversations have localExport enabled and
+// where markdown files would be written.
+func formatLocalExportDryRun(w io.Writer, conversations []config.ConversationConfig, localExportDir string) {
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Local Markdown Export: %s\n", localExportDir)
+	hasLocal := false
+	for _, c := range conversations {
+		if c.LocalExport {
+			typeName := exporter.SanitizeDirectoryName(string(c.Type), c.Name)
+			fmt.Fprintf(w, "  - %s → %s/%s/\n", c.Name, localExportDir, typeName)
+			hasLocal = true
+		}
+	}
+	if !hasLocal {
+		fmt.Fprintln(w, "  (no conversations have localExport: true)")
+	}
 }
 
 // parseDateRange converts --from and --to flag values into Slack timestamp
