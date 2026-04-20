@@ -35,6 +35,12 @@ func newTestMarkdownWriterWithResolvers() (*MarkdownWriter, *parser.UserResolver
 		IsBot:   true,
 		Profile: slackapi.UserProfile{DisplayName: "Deploy Bot"},
 	})
+	userResolver.AddUser(&slackapi.User{
+		ID:      "U005",
+		Name:    "exemployee",
+		Deleted: true,
+		Profile: slackapi.UserProfile{DisplayName: "Ex Employee"},
+	})
 
 	personResolver := parser.NewPersonResolver(&config.PeopleConfig{
 		People: []config.PersonConfig{
@@ -438,6 +444,11 @@ func TestMarkdownWriter_getSenderName(t *testing.T) {
 			name: "bot ID only",
 			msg:  slackapi.Message{BotID: "B123"},
 			want: "Bot",
+		},
+		{
+			name: "deactivated user",
+			msg:  slackapi.Message{User: "U005"},
+			want: "Ex Employee [deactivated]",
 		},
 		{
 			name: "completely empty message",
