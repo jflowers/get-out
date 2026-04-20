@@ -71,14 +71,23 @@ func WriteMarkdownFile(dir string, typeName string, date string, content []byte)
 		return fmt.Errorf("failed to create directory %s: %w", targetDir, err)
 	}
 
-	// Create temp file in the target directory
+	return atomicWriteFile(targetDir, targetPath, content)
+}
+
+// atomicWriteFile creates a temp file in targetDir, writes content, sets
+// permissions, and atomically renames to targetPath. On any error the temp
+// file is cleaned up.
+//
+// Separated from WriteMarkdownFile to reduce per-function cyclomatic
+// complexity (lower CRAP score for the same coverage level).
+func atomicWriteFile(targetDir, targetPath string, content []byte) error {
 	tmpFile, err := os.CreateTemp(targetDir, ".tmp-*.md")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 
-	// From here on, clean up the temp file on any error
+	// Clean up the temp file on any error
 	success := false
 	defer func() {
 		if !success {
@@ -86,27 +95,37 @@ func WriteMarkdownFile(dir string, typeName string, date string, content []byte)
 		}
 	}()
 
-	// Write content
-	if _, err := tmpFile.Write(content); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("failed to write temp file: %w", err)
+	// Write content and close the file handle. Both must succeed
+	// before we proceed to rename.
+	if err := writeAndClose(tmpFile, content); err != nil {
+		return err
 	}
 
-	// Close before chmod/rename
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	// Set file permissions
+	// Set deterministic permissions (CreateTemp uses 0600 by default)
 	if err := os.Chmod(tmpPath, 0644); err != nil {
 		return fmt.Errorf("failed to set file permissions: %w", err)
 	}
 
-	// Atomic rename
+	// Atomic rename to final location
 	if err := os.Rename(tmpPath, targetPath); err != nil {
 		return fmt.Errorf("failed to rename temp file to target: %w", err)
 	}
 
 	success = true
+	return nil
+}
+
+// writeAndClose writes content to f and closes it. The file is always
+// closed, even when the write fails. This consolidates two error paths
+// into one call site, reducing cyclomatic complexity in atomicWriteFile.
+func writeAndClose(f *os.File, content []byte) error {
+	_, writeErr := f.Write(content)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return fmt.Errorf("failed to write temp file: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("failed to close temp file: %w", closeErr)
+	}
 	return nil
 }
