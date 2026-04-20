@@ -217,6 +217,154 @@ func TestWriteMarkdownFile(t *testing.T) {
 	})
 }
 
+func TestWriteMarkdownFile_MkdirAllError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-based tests differ on Windows")
+	}
+
+	t.Run("returns error when directory cannot be created", func(t *testing.T) {
+		// Create a read-only parent directory so MkdirAll fails
+		// when trying to create a subdirectory inside it.
+		dir := t.TempDir()
+		readOnlyDir := filepath.Join(dir, "readonly")
+		if err := os.Mkdir(readOnlyDir, 0555); err != nil {
+			t.Fatalf("failed to create read-only dir: %v", err)
+		}
+		// Ensure cleanup can remove the directory
+		t.Cleanup(func() { _ = os.Chmod(readOnlyDir, 0755) })
+
+		err := WriteMarkdownFile(readOnlyDir, "subdir", "2026-01-01", []byte("content"))
+		if err == nil {
+			t.Fatal("expected error when MkdirAll fails")
+		}
+		if !strings.Contains(err.Error(), "failed to create directory") {
+			t.Errorf("expected 'failed to create directory' error, got: %v", err)
+		}
+	})
+}
+
+func TestAtomicWriteFile_Errors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-based tests differ on Windows")
+	}
+
+	t.Run("returns error when CreateTemp fails", func(t *testing.T) {
+		// Use a read-only directory so CreateTemp cannot create a file
+		dir := t.TempDir()
+		readOnlyDir := filepath.Join(dir, "no-write")
+		if err := os.MkdirAll(readOnlyDir, 0555); err != nil {
+			t.Fatalf("failed to create read-only dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(readOnlyDir, 0755) })
+
+		targetPath := filepath.Join(readOnlyDir, "output.md")
+		err := atomicWriteFile(readOnlyDir, targetPath, []byte("content"))
+		if err == nil {
+			t.Fatal("expected error when CreateTemp fails")
+		}
+		if !strings.Contains(err.Error(), "failed to create temp file") {
+			t.Errorf("expected 'failed to create temp file' error, got: %v", err)
+		}
+	})
+
+	t.Run("returns error when rename fails and cleans up temp file", func(t *testing.T) {
+		// Create the source directory (where temp file lives)
+		srcDir := t.TempDir()
+
+		// Use a target path in a different, read-only directory so
+		// os.Rename fails (can't create file in read-only dir).
+		parentDir := t.TempDir()
+		readOnlyTarget := filepath.Join(parentDir, "locked")
+		if err := os.MkdirAll(readOnlyTarget, 0555); err != nil {
+			t.Fatalf("failed to create read-only target dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(readOnlyTarget, 0755) })
+
+		targetPath := filepath.Join(readOnlyTarget, "output.md")
+		err := atomicWriteFile(srcDir, targetPath, []byte("content"))
+		if err == nil {
+			t.Fatal("expected error when rename fails")
+		}
+		if !strings.Contains(err.Error(), "failed to rename temp file to target") {
+			t.Errorf("expected 'failed to rename temp file to target' error, got: %v", err)
+		}
+
+		// Verify temp file was cleaned up
+		entries, readErr := os.ReadDir(srcDir)
+		if readErr != nil {
+			t.Fatalf("failed to read source dir: %v", readErr)
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".tmp-") {
+				t.Errorf("orphaned temp file not cleaned up: %s", entry.Name())
+			}
+		}
+	})
+
+	t.Run("happy path writes and renames successfully", func(t *testing.T) {
+		dir := t.TempDir()
+		targetPath := filepath.Join(dir, "output.md")
+		content := []byte("# Direct atomic write test")
+
+		err := atomicWriteFile(dir, targetPath, content)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(targetPath)
+		if err != nil {
+			t.Fatalf("failed to read output: %v", err)
+		}
+		if string(data) != string(content) {
+			t.Errorf("content mismatch: got %q, want %q", string(data), string(content))
+		}
+	})
+}
+
+func TestWriteAndClose(t *testing.T) {
+	t.Run("writes content and closes file", func(t *testing.T) {
+		dir := t.TempDir()
+		f, err := os.CreateTemp(dir, "test-*.md")
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+		path := f.Name()
+
+		content := []byte("hello world")
+		err = writeAndClose(f, content)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read file: %v", err)
+		}
+		if string(data) != string(content) {
+			t.Errorf("content mismatch: got %q, want %q", string(data), string(content))
+		}
+	})
+
+	t.Run("returns write error for closed file", func(t *testing.T) {
+		dir := t.TempDir()
+		f, err := os.CreateTemp(dir, "test-*.md")
+		if err != nil {
+			t.Fatalf("failed to create temp file: %v", err)
+		}
+
+		// Close the file first so Write will fail
+		f.Close()
+
+		err = writeAndClose(f, []byte("should fail"))
+		if err == nil {
+			t.Fatal("expected error when writing to closed file")
+		}
+		if !strings.Contains(err.Error(), "failed to write temp file") {
+			t.Errorf("expected 'failed to write temp file' error, got: %v", err)
+		}
+	})
+}
+
 func TestWriteMarkdownFile_AtomicCleanup(t *testing.T) {
 	t.Run("no orphaned temp files after successful write", func(t *testing.T) {
 		dir := t.TempDir()
