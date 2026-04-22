@@ -39,6 +39,9 @@ type Exporter struct {
 	// Local markdown export
 	localExportDir string
 
+	// Sensitivity filter (optional)
+	messageFilter MessageFilter
+
 	// Progress callback
 	onProgress func(msg string)
 
@@ -70,6 +73,10 @@ type ExporterConfig struct {
 
 	// Local markdown export directory (expanded absolute path)
 	LocalExportDir string
+
+	// MessageFilter is an optional sensitivity filter for local markdown exports.
+	// When set, messages are classified before writing markdown files.
+	MessageFilter MessageFilter
 }
 
 // Progress is a helper to report progress.
@@ -94,6 +101,7 @@ func NewExporter(cfg *ExporterConfig) *Exporter {
 		syncMode:              cfg.SyncMode,
 		resumeMode:            cfg.ResumeMode,
 		localExportDir:        cfg.LocalExportDir,
+		messageFilter:         cfg.MessageFilter,
 		userResolver:          parser.NewUserResolver(),
 		channelResolver:       parser.NewChannelResolver(),
 	}
@@ -340,7 +348,28 @@ func (e *Exporter) ExportConversation(ctx context.Context, conv config.Conversat
 
 		// Write local markdown if configured and conversation opted in
 		if e.mdWriter != nil && e.localExportDir != "" && conv.LocalExport {
-			mdContent, mdErr := e.mdWriter.RenderDailyDoc(conv.Name, string(conv.Type), date, msgs)
+			mdMsgs := msgs
+			var filterResult *FilterResult
+
+			// Apply sensitivity filter when configured (FR-006: only affects local markdown).
+			if e.messageFilter != nil {
+				var filterErr error
+				filterResult, filterErr = e.messageFilter.FilterMessages(ctx, msgs)
+				if filterErr != nil {
+				// Hard gate: filter errors are fatal (FR-007).
+				return result, fmt.Errorf("sensitivity classification failed for %q (%s): %w", conv.Name, date, filterErr)
+				}
+				if filterResult.AllFiltered() {
+					e.Progress("All %d messages filtered for %s — skipping markdown", filterResult.TotalCount, date)
+					continue
+				}
+				if filterResult.FilteredCount > 0 {
+					e.Progress("Filtered %d/%d sensitive messages for %s", filterResult.FilteredCount, filterResult.TotalCount, date)
+				}
+				mdMsgs = filterResult.PassedMessages
+			}
+
+			mdContent, mdErr := e.mdWriter.RenderDailyDoc(conv.Name, string(conv.Type), date, mdMsgs, filterResult)
 			if mdErr != nil {
 				e.Progress("Warning: failed to render markdown for %s: %v", date, mdErr)
 				result.MarkdownErrors++

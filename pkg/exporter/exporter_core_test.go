@@ -3777,3 +3777,354 @@ func TestResolveCrossLinks_WithSlackLinks(t *testing.T) {
 	// The replaced count may be 0 or more depending on mock response
 	_ = replaced
 }
+
+// ===========================================================================
+// ExportConversation — sensitivity filter integration tests (T012a)
+// ===========================================================================
+
+func TestExportConversation_WithSensitivityFilter(t *testing.T) {
+	// Set up a filter that marks messages containing "sensitive" as sensitive.
+	filter := newMockFilterThatFilters(func(msg slackapi.Message) bool {
+		return strings.Contains(msg.Text, "sensitive")
+	})
+
+	msgs := []map[string]interface{}{
+		{"user": "U001", "text": "Hello world", "ts": "1706788800.000100"},
+		{"user": "U002", "text": "This is sensitive data", "ts": "1706788801.000200"},
+		{"user": "U003", "text": "Regular message", "ts": "1706788802.000300"},
+	}
+
+	slackMux := fullMockSlackMux(t, msgs)
+	driveMux, _, _ := fullMockDriveMux(t)
+
+	exp := testExporter(t, driveMux, slackMux)
+	exp.docWriter = NewDocWriter(exp.gdriveClient, exp.slackClient, exp.userResolver, exp.channelResolver, nil, nil, nil)
+
+	// Enable local markdown export with sensitivity filter.
+	localDir := t.TempDir()
+	exp.localExportDir = localDir
+	exp.mdWriter = NewMarkdownWriter(exp.userResolver, exp.channelResolver, nil)
+	exp.messageFilter = filter
+
+	conv := config.ConversationConfig{
+		ID:          "C001",
+		Name:        "general",
+		Type:        models.ConversationTypeChannel,
+		LocalExport: true,
+	}
+
+	result, err := exp.ExportConversation(context.Background(), conv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Google Docs should have all 3 messages (filter doesn't affect Docs).
+	if result.MessageCount != 3 {
+		t.Errorf("expected 3 messages in Google Docs, got %d", result.MessageCount)
+	}
+
+	// Markdown file should have been written (not all filtered).
+	if result.MarkdownFilesWritten != 1 {
+		t.Errorf("expected 1 markdown file written, got %d", result.MarkdownFilesWritten)
+	}
+
+	// Read the markdown file and verify:
+	// - It contains non-sensitive messages
+	// - It does NOT contain the sensitive message
+	// - It has sensitivity frontmatter
+	typeName := SanitizeDirectoryName(string(conv.Type), conv.Name)
+	mdPath := filepath.Join(localDir, typeName, "2024-02-01.md")
+	mdContent, readErr := os.ReadFile(mdPath)
+	if readErr != nil {
+		t.Fatalf("failed to read markdown file: %v", readErr)
+	}
+
+	content := string(mdContent)
+
+	// Non-sensitive messages should be present.
+	if !strings.Contains(content, "Hello world") {
+		t.Error("expected 'Hello world' in markdown output")
+	}
+	if !strings.Contains(content, "Regular message") {
+		t.Error("expected 'Regular message' in markdown output")
+	}
+
+	// Sensitive message should NOT be present.
+	if strings.Contains(content, "sensitive data") {
+		t.Error("sensitive message should NOT appear in markdown output")
+	}
+
+	// Sensitivity frontmatter should be present.
+	if !strings.Contains(content, "sensitivity:") {
+		t.Error("expected sensitivity: block in frontmatter")
+	}
+	if !strings.Contains(content, "filtered_count: 1") {
+		t.Error("expected filtered_count: 1 in frontmatter")
+	}
+}
+
+func TestExportConversation_GoogleDocsUnaffected(t *testing.T) {
+	// FR-006: Google Docs path should receive ALL messages regardless of filter.
+	var capturedBatchBody map[string]interface{}
+
+	filter := newMockFilterThatFilters(func(msg slackapi.Message) bool {
+		return true // filter ALL messages
+	})
+
+	msgs := []map[string]interface{}{
+		{"user": "U001", "text": "Message one", "ts": "1706788800.000100"},
+		{"user": "U002", "text": "Message two", "ts": "1706788801.000200"},
+	}
+
+	slackMux := fullMockSlackMux(t, msgs)
+
+	driveMux := http.NewServeMux()
+	driveMux.HandleFunc("/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]interface{}{"files": []interface{}{}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "folder-1", "name": "test", "webViewLink": "https://link",
+		})
+	})
+	driveMux.HandleFunc("/upload/files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "doc-1", "name": "test-doc", "webViewLink": "https://docs/doc-1",
+		})
+	})
+	driveMux.HandleFunc("/v1/documents/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, ":batchUpdate") {
+			json.NewDecoder(r.Body).Decode(&capturedBatchBody)
+			json.NewEncoder(w).Encode(map[string]interface{}{"replies": []interface{}{}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"documentId": "doc-1",
+			"body": map[string]interface{}{
+				"content": []map[string]interface{}{
+					{"endIndex": 1, "sectionBreak": map[string]interface{}{}},
+				},
+			},
+		})
+	})
+
+	exp := testExporter(t, driveMux, slackMux)
+	exp.docWriter = NewDocWriter(exp.gdriveClient, exp.slackClient, exp.userResolver, exp.channelResolver, nil, nil, nil)
+
+	// Enable local markdown export with filter that filters everything.
+	localDir := t.TempDir()
+	exp.localExportDir = localDir
+	exp.mdWriter = NewMarkdownWriter(exp.userResolver, exp.channelResolver, nil)
+	exp.messageFilter = filter
+
+	conv := config.ConversationConfig{
+		ID:          "C001",
+		Name:        "general",
+		Type:        models.ConversationTypeChannel,
+		LocalExport: true,
+	}
+
+	result, err := exp.ExportConversation(context.Background(), conv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Google Docs should have ALL messages (2), not filtered.
+	if result.MessageCount != 2 {
+		t.Errorf("expected 2 messages in Google Docs, got %d", result.MessageCount)
+	}
+
+	// batchUpdate should have been called (Google Docs write happened).
+	if capturedBatchBody == nil {
+		t.Error("expected batchUpdate to be called for Google Docs")
+	}
+
+	// Markdown file should NOT have been written (all messages filtered → skip).
+	if result.MarkdownFilesWritten != 0 {
+		t.Errorf("expected 0 markdown files (all filtered), got %d", result.MarkdownFilesWritten)
+	}
+}
+
+func TestExportConversation_ExistingFileNotReprocessed(t *testing.T) {
+	// FR-012: Pre-existing markdown files should not be re-written.
+	// WriteMarkdownFile returns nil (no error) when the target file already
+	// exists, which means the exporter counts it as MarkdownFilesWritten++.
+	// The key invariant is that the existing file content is preserved —
+	// the file is NOT overwritten with re-filtered content.
+	filterCallCount := 0
+	filter := &mockMessageFilter{
+		filterFn: func(ctx context.Context, messages []slackapi.Message) (*FilterResult, error) {
+			filterCallCount++
+			return &FilterResult{
+				PassedMessages:    messages,
+				FilteredCount:     0,
+				CategoryBreakdown: map[string]int{},
+				TotalCount:        len(messages),
+			}, nil
+		},
+	}
+
+	msgs := []map[string]interface{}{
+		{"user": "U001", "text": "Hello world", "ts": "1706788800.000100"},
+	}
+
+	slackMux := fullMockSlackMux(t, msgs)
+	driveMux, _, _ := fullMockDriveMux(t)
+
+	exp := testExporter(t, driveMux, slackMux)
+	exp.docWriter = NewDocWriter(exp.gdriveClient, exp.slackClient, exp.userResolver, exp.channelResolver, nil, nil, nil)
+
+	// Enable local markdown export with filter.
+	localDir := t.TempDir()
+	exp.localExportDir = localDir
+	exp.mdWriter = NewMarkdownWriter(exp.userResolver, exp.channelResolver, nil)
+	exp.messageFilter = filter
+
+	conv := config.ConversationConfig{
+		ID:          "C001",
+		Name:        "general",
+		Type:        models.ConversationTypeChannel,
+		LocalExport: true,
+	}
+
+	// Pre-create the markdown file so WriteMarkdownFile skips it.
+	typeName := SanitizeDirectoryName(string(conv.Type), conv.Name)
+	targetDir := filepath.Join(localDir, typeName)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	existingContent := []byte("---\nconversation: general\n---\n\nExisting content\n")
+	if err := os.WriteFile(filepath.Join(targetDir, "2024-02-01.md"), existingContent, 0644); err != nil {
+		t.Fatalf("failed to write existing file: %v", err)
+	}
+
+	result, err := exp.ExportConversation(context.Background(), conv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The filter IS called (it runs before the write check).
+	if filterCallCount == 0 {
+		t.Error("expected filter to be called")
+	}
+
+	// WriteMarkdownFile returns nil for existing files (skip, no error),
+	// so the exporter counts it as MarkdownFilesWritten. The important
+	// thing is that the file content is preserved.
+	_ = result.MarkdownFilesWritten
+
+	// Verify the existing file content was preserved (not overwritten).
+	mdPath := filepath.Join(targetDir, "2024-02-01.md")
+	content, readErr := os.ReadFile(mdPath)
+	if readErr != nil {
+		t.Fatalf("failed to read markdown file: %v", readErr)
+	}
+	if !strings.Contains(string(content), "Existing content") {
+		t.Error("existing file content should be preserved — file was overwritten")
+	}
+}
+
+func TestExportConversation_FilterErrorIsHardGate(t *testing.T) {
+	// FR-007: Filter errors should be fatal (hard gate).
+	filter := newMockFilterError("ollama connection refused")
+
+	msgs := []map[string]interface{}{
+		{"user": "U001", "text": "Hello", "ts": "1706788800.000100"},
+	}
+
+	slackMux := fullMockSlackMux(t, msgs)
+	driveMux, _, _ := fullMockDriveMux(t)
+
+	exp := testExporter(t, driveMux, slackMux)
+	exp.docWriter = NewDocWriter(exp.gdriveClient, exp.slackClient, exp.userResolver, exp.channelResolver, nil, nil, nil)
+
+	localDir := t.TempDir()
+	exp.localExportDir = localDir
+	exp.mdWriter = NewMarkdownWriter(exp.userResolver, exp.channelResolver, nil)
+	exp.messageFilter = filter
+
+	conv := config.ConversationConfig{
+		ID:          "C001",
+		Name:        "general",
+		Type:        models.ConversationTypeChannel,
+		LocalExport: true,
+	}
+
+	_, err := exp.ExportConversation(context.Background(), conv)
+	if err == nil {
+		t.Fatal("expected error from filter to propagate (hard gate)")
+	}
+	if !strings.Contains(err.Error(), "sensitivity classification failed") {
+		t.Errorf("expected sensitivity classification failed error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ollama connection refused") {
+		t.Errorf("expected original error message, got: %v", err)
+	}
+}
+
+func TestNewExporter_WithMessageFilter(t *testing.T) {
+	filter := newMockFilterThatFilters(func(msg slackapi.Message) bool {
+		return false
+	})
+
+	cfg := &ExporterConfig{
+		ConfigDir:      "/test/config",
+		RootFolderName: "My Exports",
+		MessageFilter:  filter,
+	}
+
+	exp := NewExporter(cfg)
+	if exp.messageFilter == nil {
+		t.Error("expected messageFilter to be set from config")
+	}
+}
+
+func TestExportConversation_NoFilterNoSensitivityFrontmatter(t *testing.T) {
+	// When no filter is configured, markdown should NOT have sensitivity block.
+	msgs := []map[string]interface{}{
+		{"user": "U001", "text": "Hello", "ts": "1706788800.000100"},
+	}
+
+	slackMux := fullMockSlackMux(t, msgs)
+	driveMux, _, _ := fullMockDriveMux(t)
+
+	exp := testExporter(t, driveMux, slackMux)
+	exp.docWriter = NewDocWriter(exp.gdriveClient, exp.slackClient, exp.userResolver, exp.channelResolver, nil, nil, nil)
+
+	localDir := t.TempDir()
+	exp.localExportDir = localDir
+	exp.mdWriter = NewMarkdownWriter(exp.userResolver, exp.channelResolver, nil)
+	// No messageFilter set — nil
+
+	conv := config.ConversationConfig{
+		ID:          "C001",
+		Name:        "general",
+		Type:        models.ConversationTypeChannel,
+		LocalExport: true,
+	}
+
+	result, err := exp.ExportConversation(context.Background(), conv)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.MarkdownFilesWritten != 1 {
+		t.Fatalf("expected 1 markdown file, got %d", result.MarkdownFilesWritten)
+	}
+
+	// Read the markdown file and verify no sensitivity block.
+	typeName := SanitizeDirectoryName(string(conv.Type), conv.Name)
+	mdPath := filepath.Join(localDir, typeName, "2024-02-01.md")
+	mdContent, readErr := os.ReadFile(mdPath)
+	if readErr != nil {
+		t.Fatalf("failed to read markdown file: %v", readErr)
+	}
+
+	if strings.Contains(string(mdContent), "sensitivity:") {
+		t.Error("should NOT have sensitivity block when no filter is configured")
+	}
+}

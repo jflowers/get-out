@@ -29,7 +29,11 @@ func NewMarkdownWriter(userResolver *parser.UserResolver, channelResolver *parse
 
 // RenderDailyDoc produces a complete markdown document with YAML frontmatter
 // for the given conversation's messages on a specific date.
-func (w *MarkdownWriter) RenderDailyDoc(convName string, convType string, date string, messages []slackapi.Message) ([]byte, error) {
+//
+// When filterResult is non-nil, a sensitivity: block is added to the YAML
+// frontmatter for audit purposes. When filterResult is nil, no sensitivity
+// block is emitted (backward compatible with pre-filter exports).
+func (w *MarkdownWriter) RenderDailyDoc(convName string, convType string, date string, messages []slackapi.Message, filterResult *FilterResult) ([]byte, error) {
 	// Sort messages by timestamp (oldest first)
 	sorted := make([]slackapi.Message, len(messages))
 	copy(sorted, messages)
@@ -52,6 +56,12 @@ func (w *MarkdownWriter) RenderDailyDoc(convName string, convType string, date s
 	for _, p := range participants {
 		b.WriteString(fmt.Sprintf("  - %s\n", p))
 	}
+
+	// Sensitivity metadata — only when a filter was applied.
+	if filterResult != nil {
+		w.renderSensitivityFrontmatter(&b, filterResult)
+	}
+
 	b.WriteString("---\n\n")
 
 	// Render each message
@@ -60,6 +70,31 @@ func (w *MarkdownWriter) RenderDailyDoc(convName string, convType string, date s
 	}
 
 	return []byte(b.String()), nil
+}
+
+// renderSensitivityFrontmatter writes the sensitivity: YAML block into the
+// frontmatter builder. Called only when a FilterResult is available.
+func (w *MarkdownWriter) renderSensitivityFrontmatter(b *strings.Builder, fr *FilterResult) {
+	b.WriteString(fmt.Sprintf("sensitivity:\n"))
+	b.WriteString(fmt.Sprintf("  filtered_count: %d\n", fr.FilteredCount))
+	if fr.FilteredCount > 0 && len(fr.CategoryBreakdown) > 0 {
+		b.WriteString("  categories:\n")
+		// Sort categories for deterministic output.
+		cats := sortedMapKeys(fr.CategoryBreakdown)
+		for _, cat := range cats {
+			b.WriteString(fmt.Sprintf("    %s: %d\n", cat, fr.CategoryBreakdown[cat]))
+		}
+	}
+}
+
+// sortedMapKeys returns the keys of a map[string]int in sorted order.
+func sortedMapKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // collectParticipants extracts unique sender names from the messages, sorted alphabetically.

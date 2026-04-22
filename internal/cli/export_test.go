@@ -1,9 +1,17 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jflowers/get-out/pkg/config"
+	"github.com/jflowers/get-out/pkg/ollama"
 )
 
 func TestParseDateFlag(t *testing.T) {
@@ -89,4 +97,149 @@ func TestSafePreview(t *testing.T) {
 // using the same UTC interpretation that parseDateFlag uses (time.Parse with "2006-01-02").
 func mustParseUnix(year, month, day int) int64 {
 	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC).Unix()
+}
+
+// ---------------------------------------------------------------------------
+// T014: validateOllamaPrerequisites tests
+// ---------------------------------------------------------------------------
+
+func TestValidateOllamaPrerequisites_Unreachable(t *testing.T) {
+	t.Parallel()
+	// Use an endpoint that will refuse connections.
+	client := ollama.NewClient("http://127.0.0.1:1", "granite-guardian:8b")
+	err := validateOllamaPrerequisites(context.Background(), client)
+	if err == nil {
+		t.Fatal("expected error for unreachable endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "not reachable") {
+		t.Errorf("error should mention 'not reachable', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--no-sensitivity-filter") {
+		t.Errorf("error should mention --no-sensitivity-filter, got: %v", err)
+	}
+}
+
+func TestValidateOllamaPrerequisites_ModelNotAvailable(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Ollama is running"))
+	})
+	mux.HandleFunc("/api/tags", func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}{
+			Models: []struct {
+				Name string `json:"name"`
+			}{
+				{Name: "llama3:latest"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := ollama.NewClient(srv.URL, "granite-guardian:8b", ollama.WithHTTPClient(srv.Client()))
+	err := validateOllamaPrerequisites(context.Background(), client)
+	if err == nil {
+		t.Fatal("expected error for missing model, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention model not found, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ollama pull") {
+		t.Errorf("error should suggest 'ollama pull', got: %v", err)
+	}
+}
+
+func TestValidateOllamaPrerequisites_AllOK(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Ollama is running"))
+	})
+	mux.HandleFunc("/api/tags", func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}{
+			Models: []struct {
+				Name string `json:"name"`
+			}{
+				{Name: "granite-guardian:8b"},
+				{Name: "llama3:latest"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := ollama.NewClient(srv.URL, "granite-guardian:8b", ollama.WithHTTPClient(srv.Client()))
+	err := validateOllamaPrerequisites(context.Background(), client)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T014: Endpoint resolution tests
+// ---------------------------------------------------------------------------
+
+func TestResolveOllamaEndpoint_FlagOverridesSettings(t *testing.T) {
+	t.Parallel()
+	settings := &config.Settings{
+		Ollama: &config.OllamaConfig{
+			Endpoint: "http://custom-host:11434",
+		},
+	}
+	got := resolveOllamaEndpoint("http://flag-host:11434", settings)
+	if got != "http://flag-host:11434" {
+		t.Errorf("resolveOllamaEndpoint() = %q, want flag value", got)
+	}
+}
+
+func TestResolveOllamaEndpoint_SettingsOverridesDefault(t *testing.T) {
+	t.Parallel()
+	settings := &config.Settings{
+		Ollama: &config.OllamaConfig{
+			Endpoint: "http://custom-host:11434",
+		},
+	}
+	got := resolveOllamaEndpoint("", settings)
+	if got != "http://custom-host:11434" {
+		t.Errorf("resolveOllamaEndpoint() = %q, want settings value", got)
+	}
+}
+
+func TestResolveOllamaEndpoint_DefaultFallback(t *testing.T) {
+	t.Parallel()
+	settings := &config.Settings{
+		Ollama: &config.OllamaConfig{},
+	}
+	got := resolveOllamaEndpoint("", settings)
+	if got != config.DefaultOllamaEndpoint {
+		t.Errorf("resolveOllamaEndpoint() = %q, want default %q", got, config.DefaultOllamaEndpoint)
+	}
+}
+
+func TestResolveOllamaEndpoint_NilOllamaConfig(t *testing.T) {
+	t.Parallel()
+	settings := &config.Settings{}
+	got := resolveOllamaEndpoint("", settings)
+	if got != config.DefaultOllamaEndpoint {
+		t.Errorf("resolveOllamaEndpoint() = %q, want default %q", got, config.DefaultOllamaEndpoint)
+	}
 }

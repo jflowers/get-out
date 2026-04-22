@@ -19,6 +19,7 @@ A CLI tool to export Slack messages (DMs, groups, channels) to Google Docs with 
 - **Pre-export validation**: Verifies Slack session and Google token before starting long exports
 - **Name resolution**: Converts Slack user IDs to real names in exported documents
 - **People discovery**: Auto-populate user mappings from configured conversations
+- **Sensitivity filtering**: Optionally exclude sensitive messages from local markdown export using a local LLM (Ollama + Granite Guardian)
 
 ## Prerequisites
 
@@ -292,6 +293,12 @@ On subsequent runs, Chrome reuses the dedicated profile so you're already signed
 
 # Export with local markdown copies for Dewey indexing
 ./get-out export --local-export-dir ~/.get-out/export --config ./config
+
+# Export with sensitivity filtering disabled for this run
+./get-out export --no-sensitivity-filter --local-export-dir ~/.get-out/export --config ./config
+
+# Export using a custom Ollama endpoint
+./get-out export --ollama-endpoint http://192.168.1.100:11434 --config ./config
 ```
 
 ### Check Export Status
@@ -327,6 +334,8 @@ Shows conversation export progress: status (complete/in-progress), message count
 --parallel int         Number of conversations to export concurrently, max 5 (default 1)
 --user-mapping string       Path to people.json for @mention linking
 --local-export-dir string   Directory for local markdown export (overrides localExportOutputDir in settings.json)
+--no-sensitivity-filter     Disable sensitivity filtering for this run
+--ollama-endpoint string    Override Ollama endpoint URL
 ```
 
 **Note:** The `--folder-id` can be found in a Google Drive folder URL: `https://drive.google.com/drive/folders/{folder-id}`
@@ -401,6 +410,89 @@ Point a Dewey disk source at the export directory to make conversations searchab
     path: "~/.get-out/export"
 ```
 
+### Sensitivity Filtering
+
+When local markdown export is enabled, you can optionally filter out sensitive messages using a local LLM. Messages classified as sensitive (HR, legal, financial, health-related) are excluded from markdown files. Google Docs exports are unaffected — they always include all messages.
+
+**Prerequisites:**
+
+1. [Ollama](https://ollama.com/download) installed and running (`ollama serve`)
+2. Granite Guardian model pulled: `ollama pull granite-guardian:8b`
+
+**Configuration:**
+
+Add the `ollama` section to `settings.json`:
+
+```json
+{
+  "ollama": {
+    "enabled": true,
+    "endpoint": "http://localhost:11434",
+    "model": "granite-guardian:8b"
+  }
+}
+```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `enabled` | Yes | `false` | Must be `true` to activate filtering |
+| `endpoint` | No | `http://localhost:11434` | Ollama REST API URL |
+| `model` | No | `granite-guardian:8b` | Model to use for classification |
+
+**Usage:**
+
+```bash
+# Export with sensitivity filtering (uses settings.json config)
+get-out export --local-export-dir ~/.get-out/export
+
+# Skip sensitivity filtering for this run only
+get-out export --no-sensitivity-filter --local-export-dir ~/.get-out/export
+
+# Use a different Ollama instance
+get-out export --ollama-endpoint http://192.168.1.100:11434
+```
+
+**Example output with sensitivity metadata:**
+
+```markdown
+---
+conversation: HR Team
+type: channel
+date: "2026-04-21"
+sensitivity:
+  filtered_count: 3
+  categories:
+    hr: 2
+    financial: 1
+---
+
+**10:15 AM -- Alice Johnson**
+
+Team standup notes for today: Sprint review at 2pm.
+
+**10:32 AM -- Bob Smith**
+
+Updated the PTO policy document — please review.
+```
+
+In this example, 3 sensitive messages were excluded. The `sensitivity` frontmatter section shows what was filtered and why.
+
+**Doctor checks:**
+
+Run `get-out doctor` to verify Ollama reachability and model availability:
+
+```
+  ✓ Ollama: OK (http://localhost:11434)
+  ✓ Sensitivity model: OK (granite-guardian:8b)
+```
+
+These checks only appear when `ollama.enabled` is `true` in settings.json.
+
+**Notes:**
+- Previously exported markdown files are not retroactively re-filtered
+- The classifier errs on the side of caution — false positives (normal messages excluded) are preferred over false negatives (sensitive messages leaking)
+- Use `--no-sensitivity-filter` to bypass filtering for any run
+
 ## Project Structure
 
 ```
@@ -421,7 +513,9 @@ get-out/
 │   ├── gdrive/           # Google Drive/Docs API client
 │   ├── exporter/         # Export orchestration and indexing
 │   │   ├── mdwriter.go   # Markdown writer for local export
-│   │   └── mdfile.go     # Filesystem operations for markdown export
+│   │   ├── mdfile.go     # Filesystem operations for markdown export
+│   │   └── sensitivity.go # Sensitivity filter integration
+│   ├── ollama/           # Ollama REST API client and Granite Guardian classifier
 │   ├── parser/           # Slack mrkdwn, user/person resolution
 │   ├── config/           # Configuration loading
 │   └── models/           # Shared data models

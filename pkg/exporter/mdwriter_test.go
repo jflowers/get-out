@@ -66,7 +66,7 @@ func TestRenderDailyDoc_Frontmatter(t *testing.T) {
 		{User: "U002", Text: "Hi there", TS: "1706788801.000002"},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestRenderDailyDoc_FrontmatterPrivateChannelType(t *testing.T) {
 		{User: "U001", Text: "Secret stuff", TS: "1706788800.000001"},
 	}
 
-	doc, err := w.RenderDailyDoc("secret-channel", "private_channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("secret-channel", "private_channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRenderDailyDoc_MessageOrdering(t *testing.T) {
 		{User: "U001", Text: "Third", TS: "1706788810.000003"},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRenderDailyDoc_UniqueParticipants(t *testing.T) {
 		{User: "U001", Text: "msg3", TS: "1706788802.000003"},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestRenderDailyDoc_MultiSender(t *testing.T) {
 		{User: "U004", Text: "from Charlie", TS: "1706788802.000003"},
 	}
 
-	doc, err := w.RenderDailyDoc("team", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("team", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -196,7 +196,7 @@ func TestRenderDailyDoc_MultiSender(t *testing.T) {
 func TestRenderDailyDoc_EmptyMessages(t *testing.T) {
 	w := newTestMarkdownWriter()
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", nil)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", nil, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -222,7 +222,7 @@ func TestRenderDailyDoc_EmptyMessages(t *testing.T) {
 func TestRenderDailyDoc_EmptySlice(t *testing.T) {
 	w := newTestMarkdownWriter()
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", []slackapi.Message{})
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", []slackapi.Message{}, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -251,7 +251,7 @@ func TestRenderDailyDoc_Reactions(t *testing.T) {
 		},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -278,7 +278,7 @@ func TestRenderDailyDoc_Attachments(t *testing.T) {
 		},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -301,7 +301,7 @@ func TestRenderDailyDoc_AttachmentWithTitleLink(t *testing.T) {
 		},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -328,7 +328,7 @@ func TestRenderDailyDoc_ThreadParentMarker(t *testing.T) {
 		},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -348,7 +348,7 @@ func TestRenderDailyDoc_NoThreadMarkerForNonParent(t *testing.T) {
 		},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -369,7 +369,7 @@ func TestRenderDailyDoc_MessageFormat(t *testing.T) {
 		{User: "U001", Text: "Hello world", TS: "1706788800.000001"},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -393,7 +393,7 @@ func TestRenderDailyDoc_BotSender(t *testing.T) {
 		{Username: "deploy-bot", Text: "Deployed v1.0", TS: "1706788800.000001"},
 	}
 
-	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -644,7 +644,7 @@ func TestRenderDailyDoc_FullIntegration(t *testing.T) {
 		},
 	}
 
-	doc, err := w.RenderDailyDoc("engineering", "channel", "2024-02-01", messages)
+	doc, err := w.RenderDailyDoc("engineering", "channel", "2024-02-01", messages, nil)
 	if err != nil {
 		t.Fatalf("RenderDailyDoc() error = %v", err)
 	}
@@ -674,6 +674,104 @@ func TestRenderDailyDoc_FullIntegration(t *testing.T) {
 
 	// Thread marker on Bob's message
 	mustContain(t, content, "**Thread replies:**")
+}
+
+// ---------------------------------------------------------------------------
+// RenderDailyDoc: sensitivity frontmatter
+// ---------------------------------------------------------------------------
+
+func TestRenderDailyDoc_WithFilterResult(t *testing.T) {
+	w := newTestMarkdownWriter()
+
+	messages := []slackapi.Message{
+		{User: "U001", Text: "Hello", TS: "1706788800.000001"},
+		{User: "U002", Text: "World", TS: "1706788801.000002"},
+	}
+
+	filterResult := &FilterResult{
+		FilteredCount: 3,
+		TotalCount:    5,
+		CategoryBreakdown: map[string]int{
+			"hr":        2,
+			"financial": 1,
+		},
+	}
+
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, filterResult)
+	if err != nil {
+		t.Fatalf("RenderDailyDoc() error = %v", err)
+	}
+
+	content := string(doc)
+
+	// Verify sensitivity block in frontmatter
+	mustContain(t, content, "sensitivity:")
+	mustContain(t, content, "  filtered_count: 3")
+	mustContain(t, content, "  categories:")
+	mustContain(t, content, "    financial: 1")
+	mustContain(t, content, "    hr: 2")
+
+	// Verify the rest of the frontmatter is still correct
+	mustContain(t, content, "conversation: general")
+	mustContain(t, content, "type: channel")
+
+	// Verify messages are still rendered
+	mustContain(t, content, "Hello")
+	mustContain(t, content, "World")
+}
+
+func TestRenderDailyDoc_WithFilterResultZeroFiltered(t *testing.T) {
+	w := newTestMarkdownWriter()
+
+	messages := []slackapi.Message{
+		{User: "U001", Text: "Hello", TS: "1706788800.000001"},
+	}
+
+	filterResult := &FilterResult{
+		FilteredCount:     0,
+		TotalCount:        1,
+		CategoryBreakdown: map[string]int{},
+	}
+
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, filterResult)
+	if err != nil {
+		t.Fatalf("RenderDailyDoc() error = %v", err)
+	}
+
+	content := string(doc)
+
+	// Should include sensitivity block with filtered_count: 0 (audit trail)
+	mustContain(t, content, "sensitivity:")
+	mustContain(t, content, "  filtered_count: 0")
+
+	// Should NOT include categories block when nothing was filtered
+	if strings.Contains(content, "  categories:") {
+		t.Error("should not include categories block when filtered_count is 0")
+	}
+}
+
+func TestRenderDailyDoc_WithNilFilterResult(t *testing.T) {
+	w := newTestMarkdownWriter()
+
+	messages := []slackapi.Message{
+		{User: "U001", Text: "Hello", TS: "1706788800.000001"},
+	}
+
+	doc, err := w.RenderDailyDoc("general", "channel", "2024-02-01", messages, nil)
+	if err != nil {
+		t.Fatalf("RenderDailyDoc() error = %v", err)
+	}
+
+	content := string(doc)
+
+	// No sensitivity block when filterResult is nil (backward compatible)
+	if strings.Contains(content, "sensitivity:") {
+		t.Error("should not include sensitivity block when filterResult is nil")
+	}
+
+	// Normal frontmatter should still be present
+	mustContain(t, content, "conversation: general")
+	mustContain(t, content, "type: channel")
 }
 
 // ---------------------------------------------------------------------------

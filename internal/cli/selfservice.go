@@ -21,6 +21,7 @@ import (
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/exporter"
 	"github.com/jflowers/get-out/pkg/gdrive"
+	"github.com/jflowers/get-out/pkg/ollama"
 	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/jflowers/get-out/pkg/slackapi"
 	"github.com/spf13/cobra"
@@ -393,6 +394,19 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// Check 11: Background sync service
 	checkServiceInstalled(&passCount, &warnCount)
 
+	// Check 12: Ollama sensitivity filter (only when configured)
+	if doctorSettings.Ollama != nil && doctorSettings.Ollama.Enabled {
+		endpoint := doctorSettings.Ollama.Endpoint
+		if endpoint == "" {
+			endpoint = config.DefaultOllamaEndpoint
+		}
+		model := doctorSettings.Ollama.Model
+		if model == "" {
+			model = config.DefaultOllamaModel
+		}
+		checkOllama(endpoint, model, &passCount, &warnCount, &failCount)
+	}
+
 	// T019: Old directory warning
 	home, _ := os.UserHomeDir()
 	oldDir := filepath.Join(home, ".config", "get-out")
@@ -656,6 +670,40 @@ func checkExportIndex(dir string, pass_, warn_, fail_ *int) {
 	if verbose {
 		fmt.Println(dimStyle.Render("    " + path))
 	}
+	*pass_++
+}
+
+// checkOllama checks Ollama reachability and model availability for the
+// sensitivity filter. It creates a short-lived client with a 5-second timeout
+// to avoid blocking the doctor command on a slow or unresponsive Ollama.
+func checkOllama(endpoint, model string, pass_, warn_, fail_ *int) {
+	client := ollama.NewClient(endpoint, model)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx); err != nil {
+		fail(fmt.Sprintf("Ollama: not reachable at %s", endpoint))
+		hint("Start Ollama: ollama serve")
+		*fail_++
+		return
+	}
+	pass(fmt.Sprintf("Ollama: OK (%s)", endpoint))
+	*pass_++
+
+	available, err := client.ModelAvailable(ctx)
+	if err != nil {
+		fail(fmt.Sprintf("Sensitivity model: error checking %q — %s", model, err.Error()))
+		*fail_++
+		return
+	}
+	if !available {
+		fail(fmt.Sprintf("Sensitivity model: %q not found", model))
+		hint("Pull the model: ollama pull " + model)
+		*fail_++
+		return
+	}
+	pass(fmt.Sprintf("Sensitivity model: OK (%s)", model))
 	*pass_++
 }
 

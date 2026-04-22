@@ -3,6 +3,29 @@ package config
 
 import "github.com/jflowers/get-out/pkg/models"
 
+// DefaultOllamaEndpoint is the default Ollama REST API endpoint.
+const DefaultOllamaEndpoint = "http://localhost:11434"
+
+// DefaultOllamaModel is the default model for sensitivity classification.
+const DefaultOllamaModel = "granite-guardian:8b"
+
+// OllamaConfig holds configuration for the Ollama-based sensitivity classifier.
+// When present and Enabled is true, sensitivity filtering is active for local
+// markdown exports.
+type OllamaConfig struct {
+	// Enabled controls whether sensitivity filtering is active.
+	// Default: false (feature must be explicitly opted into).
+	Enabled bool `json:"enabled"`
+
+	// Endpoint is the Ollama REST API base URL.
+	// Default: "http://localhost:11434"
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// Model is the Ollama model to use for classification.
+	// Default: "granite-guardian:8b"
+	Model string `json:"model,omitempty"`
+}
+
 // Settings is the root structure for settings.json.
 // It contains application-wide configuration options.
 type Settings struct {
@@ -22,6 +45,10 @@ type Settings struct {
 
 	// Logging
 	LogLevel string `json:"logLevel,omitempty"`
+
+	// Ollama configuration for sensitivity filtering (optional).
+	// When nil or Enabled is false, sensitivity filtering is disabled.
+	Ollama *OllamaConfig `json:"ollama,omitempty"`
 }
 
 // DefaultSettings returns settings with default values.

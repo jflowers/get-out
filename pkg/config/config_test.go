@@ -595,6 +595,150 @@ func TestConversationConfig_LocalExport(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// T005: OllamaConfig settings tests
+// ---------------------------------------------------------------------------
+
+func TestLoadSettings_WithOllamaConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	data := `{
+		"slackWorkspaceUrl": "https://app.slack.com",
+		"ollama": {
+			"enabled": true,
+			"endpoint": "http://remote-host:11434",
+			"model": "granite-guardian:2b"
+		}
+	}`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings() error: %v", err)
+	}
+
+	if s.Ollama == nil {
+		t.Fatal("Ollama config should not be nil")
+	}
+	if !s.Ollama.Enabled {
+		t.Error("Ollama.Enabled = false, want true")
+	}
+	if s.Ollama.Endpoint != "http://remote-host:11434" {
+		t.Errorf("Ollama.Endpoint = %q, want http://remote-host:11434", s.Ollama.Endpoint)
+	}
+	if s.Ollama.Model != "granite-guardian:2b" {
+		t.Errorf("Ollama.Model = %q, want granite-guardian:2b", s.Ollama.Model)
+	}
+}
+
+func TestLoadSettings_WithoutOllamaConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	data := `{
+		"slackWorkspaceUrl": "https://app.slack.com",
+		"logLevel": "DEBUG"
+	}`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings() error: %v", err)
+	}
+
+	if s.Ollama != nil {
+		t.Errorf("Ollama should be nil when not present in JSON, got %+v", s.Ollama)
+	}
+}
+
+func TestLoadSettings_OllamaOmitemptyDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	// Only "enabled" is set — endpoint and model are omitted
+	data := `{
+		"slackWorkspaceUrl": "https://app.slack.com",
+		"ollama": {"enabled": true}
+	}`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettings(path)
+	if err != nil {
+		t.Fatalf("LoadSettings() error: %v", err)
+	}
+
+	if s.Ollama == nil {
+		t.Fatal("Ollama config should not be nil")
+	}
+	if !s.Ollama.Enabled {
+		t.Error("Ollama.Enabled = false, want true")
+	}
+	// Endpoint and Model should be empty strings (caller applies defaults)
+	if s.Ollama.Endpoint != "" {
+		t.Errorf("Ollama.Endpoint = %q, want empty string", s.Ollama.Endpoint)
+	}
+	if s.Ollama.Model != "" {
+		t.Errorf("Ollama.Model = %q, want empty string", s.Ollama.Model)
+	}
+}
+
+func TestSettings_MarshalOllamaOmitempty(t *testing.T) {
+	s := &Settings{
+		SlackWorkspaceURL: "https://app.slack.com",
+		LogLevel:          "INFO",
+		Ollama:            nil,
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	jsonStr := string(data)
+	if containsStr(jsonStr, `"ollama"`) {
+		t.Errorf("JSON should not contain 'ollama' when Ollama is nil, got: %s", jsonStr)
+	}
+}
+
+func TestSettings_MarshalOllamaPresent(t *testing.T) {
+	s := &Settings{
+		SlackWorkspaceURL: "https://app.slack.com",
+		LogLevel:          "INFO",
+		Ollama: &OllamaConfig{
+			Enabled:  true,
+			Endpoint: "http://localhost:11434",
+			Model:    "granite-guardian:8b",
+		},
+	}
+
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	jsonStr := string(data)
+	if !containsStr(jsonStr, `"ollama"`) {
+		t.Errorf("JSON should contain 'ollama' when Ollama is set, got: %s", jsonStr)
+	}
+	if !containsStr(jsonStr, `"enabled":true`) {
+		t.Errorf("JSON should contain enabled:true, got: %s", jsonStr)
+	}
+}
+
+// containsStr checks if s contains substr (helper to avoid importing strings).
+func containsStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDefaultSettings_DistinctInstances(t *testing.T) {
 	a := DefaultSettings()
 	b := DefaultSettings()
