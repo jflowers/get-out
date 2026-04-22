@@ -15,23 +15,26 @@ import (
 	"github.com/jflowers/get-out/pkg/config"
 	"github.com/jflowers/get-out/pkg/exporter"
 	"github.com/jflowers/get-out/pkg/models"
+	"github.com/jflowers/get-out/pkg/ollama"
 	"github.com/jflowers/get-out/pkg/secrets"
 	"github.com/spf13/cobra"
 )
 
 var (
-	exportFolder        string
-	exportFolderID      string
-	exportDryRun        bool
-	exportResume        bool
-	exportFrom          string
-	exportTo            string
-	exportSync          bool
-	exportUserMapping   string
-	exportAllDMs        bool
-	exportAllGroups     bool
-	exportParallel      int
-	exportLocalExportDir string
+	exportFolder               string
+	exportFolderID             string
+	exportDryRun               bool
+	exportResume               bool
+	exportFrom                 string
+	exportTo                   string
+	exportSync                 bool
+	exportUserMapping          string
+	exportAllDMs               bool
+	exportAllGroups            bool
+	exportParallel             int
+	exportLocalExportDir       string
+	exportNoSensitivityFilter  bool
+	exportOllamaEndpoint       string
 )
 
 var exportCmd = &cobra.Command{
@@ -94,6 +97,8 @@ func init() {
 	exportCmd.Flags().BoolVar(&exportAllGroups, "all-groups", false, "Export all group (MPIM) conversations")
 	exportCmd.Flags().IntVar(&exportParallel, "parallel", 1, "Number of conversations to export concurrently (max 5)")
 	exportCmd.Flags().StringVar(&exportLocalExportDir, "local-export-dir", "", "Directory for local markdown export (overrides settings)")
+	exportCmd.Flags().BoolVar(&exportNoSensitivityFilter, "no-sensitivity-filter", false, "Disable sensitivity filtering for this run")
+	exportCmd.Flags().StringVar(&exportOllamaEndpoint, "ollama-endpoint", "", "Override Ollama endpoint URL")
 	rootCmd.AddCommand(exportCmd)
 }
 
@@ -120,6 +125,29 @@ func runExport(cmd *cobra.Command, args []string) error {
 		if pathErr != nil {
 			return fmt.Errorf("invalid local export directory: %w", pathErr)
 		}
+	}
+
+	// Sensitivity filter initialization: validate Ollama prerequisites and
+	// create the MessageFilter before building ExporterConfig (US2: fail fast).
+	var messageFilter exporter.MessageFilter
+	if settings.Ollama != nil && settings.Ollama.Enabled && !exportNoSensitivityFilter {
+		ollamaEndpoint := resolveOllamaEndpoint(exportOllamaEndpoint, settings)
+		ollamaModel := settings.Ollama.Model
+		if ollamaModel == "" {
+			ollamaModel = config.DefaultOllamaModel
+		}
+
+		ollamaClient := ollama.NewClient(ollamaEndpoint, ollamaModel)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := validateOllamaPrerequisites(ctx, ollamaClient); err != nil {
+			cancel()
+			return err
+		}
+		cancel()
+
+		guardian := ollama.NewGuardian(ollamaClient)
+		messageFilter = exporter.NewOllamaFilter(guardian)
 	}
 
 	// Load conversations config
@@ -232,6 +260,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 		SyncMode:              exportSync,
 		ResumeMode:            exportResume,
 		LocalExportDir:        localExportDir,
+		MessageFilter:         messageFilter,
 		OnProgress: func(msg string) {
 			if verbose || debugMode {
 				fmt.Printf("  %s\n", msg)
@@ -478,6 +507,37 @@ func formatLocalExportDryRun(w io.Writer, conversations []config.ConversationCon
 	if !hasLocal {
 		fmt.Fprintln(w, "  (no conversations have localExport: true)")
 	}
+}
+
+// validateOllamaPrerequisites checks that the Ollama server is reachable and
+// the configured model is available. Returns a user-friendly error with
+// remediation hints on failure (SC-002: fail within 5 seconds).
+func validateOllamaPrerequisites(ctx context.Context, client *ollama.Client) error {
+	if err := client.Ping(ctx); err != nil {
+		return fmt.Errorf("Ollama is not reachable: %w\n\nEnsure Ollama is running (ollama serve) or use --no-sensitivity-filter to skip", err)
+	}
+
+	available, err := client.ModelAvailable(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check Ollama model availability: %w", err)
+	}
+	if !available {
+		return fmt.Errorf("Ollama model not found\n\nPull the model with: ollama pull <model>\nOr use --no-sensitivity-filter to skip sensitivity filtering")
+	}
+
+	return nil
+}
+
+// resolveOllamaEndpoint determines the Ollama endpoint using the priority
+// chain: CLI flag > settings.json > DefaultOllamaEndpoint.
+func resolveOllamaEndpoint(flagValue string, settings *config.Settings) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if settings.Ollama != nil && settings.Ollama.Endpoint != "" {
+		return settings.Ollama.Endpoint
+	}
+	return config.DefaultOllamaEndpoint
 }
 
 // parseDateRange converts --from and --to flag values into Slack timestamp

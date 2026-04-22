@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -775,6 +777,96 @@ func TestIsPortOpen(t *testing.T) {
 			t.Errorf("isPortOpen(%d) = true, want false (no listener)", port)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// T018: checkOllama tests
+// ---------------------------------------------------------------------------
+
+// ollamaMockServer creates an httptest.Server that simulates Ollama's
+// ping (GET /) and model listing (GET /api/tags) endpoints.
+// If models is nil, the /api/tags endpoint is not registered (simulating
+// a server that only responds to ping).
+func ollamaMockServer(t *testing.T, models []string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Only respond to exact root path to avoid catching /api/tags
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Ollama is running"))
+	})
+	if models != nil {
+		mux.HandleFunc("/api/tags", func(w http.ResponseWriter, r *http.Request) {
+			type m struct {
+				Name string `json:"name"`
+			}
+			var ms []m
+			for _, name := range models {
+				ms = append(ms, m{Name: name})
+			}
+			resp := struct {
+				Models []m `json:"models"`
+			}{Models: ms}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+		})
+	}
+	return httptest.NewServer(mux)
+}
+
+func TestCheckOllama_AllOK(t *testing.T) {
+	t.Parallel()
+	srv := ollamaMockServer(t, []string{"granite-guardian:8b", "llama3:latest"})
+	defer srv.Close()
+
+	// checkOllama creates its own client internally, but we need to test
+	// with our mock server. Since checkOllama uses ollama.NewClient which
+	// uses the default HTTP client, we test by calling checkOllama with
+	// the mock server's URL as the endpoint.
+	var p, w, f int
+	checkOllama(srv.URL, "granite-guardian:8b", &p, &w, &f)
+	if p != 2 {
+		t.Errorf("got pass=%d, want 2 (Ollama OK + model OK)", p)
+	}
+	if f != 0 {
+		t.Errorf("got fail=%d, want 0", f)
+	}
+	if w != 0 {
+		t.Errorf("got warn=%d, want 0", w)
+	}
+}
+
+func TestCheckOllama_Unreachable(t *testing.T) {
+	t.Parallel()
+	// Use an endpoint that will refuse connections.
+	var p, w, f int
+	checkOllama("http://127.0.0.1:1", "granite-guardian:8b", &p, &w, &f)
+	if f != 1 {
+		t.Errorf("got fail=%d, want 1 (Ollama unreachable)", f)
+	}
+	if p != 0 {
+		t.Errorf("got pass=%d, want 0 (should not pass when unreachable)", p)
+	}
+}
+
+func TestCheckOllama_ModelMissing(t *testing.T) {
+	t.Parallel()
+	// Server is reachable but the requested model is not in the tags list.
+	srv := ollamaMockServer(t, []string{"llama3:latest", "codellama:7b"})
+	defer srv.Close()
+
+	var p, w, f int
+	checkOllama(srv.URL, "granite-guardian:8b", &p, &w, &f)
+	if p != 1 {
+		t.Errorf("got pass=%d, want 1 (Ollama OK)", p)
+	}
+	if f != 1 {
+		t.Errorf("got fail=%d, want 1 (model missing)", f)
+	}
 }
 
 func TestLaunchChrome_NoBinary(t *testing.T) {
