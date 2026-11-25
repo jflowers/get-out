@@ -15,7 +15,7 @@ builds:
       - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
@@ -47,7 +47,6 @@ homebrew_casks:
     repository:
       owner: jflowers
       name: homebrew-tools
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/jflowers/get-out
     description: >-
       Export Slack messages (DMs, groups, channels) to organized Google Docs
@@ -55,9 +54,10 @@ homebrew_casks:
       - get-out
     manpages:
       - man/get-out.1
-    skip_upload: auto
-    commit_msg_template: >-
-      Brew cask update for {{ .ProjectName }} version {{ .Tag }}
+    # skip_upload: true: GoReleaser writes the cask to dist/ (a release asset,
+    # below); jflowers/ship's go-release.yml sets its darwin sha256s to the
+    # signed archives', audits and install-checks it, and pushes it to the tap.
+    skip_upload: true
 
 release:
   github:
@@ -65,3 +65,5 @@ release:
     name: get-out
   prerelease: auto
   make_latest: true
+  extra_files:
+    - glob: dist/homebrew/Casks/get-out.rb
